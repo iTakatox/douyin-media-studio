@@ -105,6 +105,20 @@ dist/DouyinMediaStudio.exe
 
 ## 构建安装包
 
+推荐使用 PyInstaller 安装器：
+
+```powershell
+.\build-installer-py.ps1
+```
+
+生成：
+
+```text
+release/DouyinMediaStudioSetup-v1.2.1.exe
+```
+
+旧的 IExpress 构建脚本保留作备用，但不推荐。
+
 ```powershell
 .\build-installer.ps1
 ```
