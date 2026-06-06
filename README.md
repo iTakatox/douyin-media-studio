@@ -4,23 +4,32 @@
 
 > 仅用于你自己的账号或已获授权的内容。
 
-## 用户下载和安装
+## 用户下载和安装（推荐）
 
-1. 打开 Releases 页面，下载最新的 `DouyinMediaStudio-*.zip`。
-2. 解压 ZIP。
-3. 右键 PowerShell 运行：
+1. 打开 Releases 页面。
+2. 下载最新的安装包：
 
-```powershell
-.\setup.ps1
+```text
+DouyinMediaStudioSetup-*.exe
 ```
 
-4. 安装完成后，桌面会出现：
+3. 双击运行安装包。
+4. 安装器会自动解压程序、安装依赖、创建桌面图标。
+5. 安装完成后，桌面会出现：
 
 ```text
 Douyin Media Studio
 ```
 
-5. 双击桌面图标启动。
+6. 双击桌面图标启动。
+
+## ZIP 源码包安装（备用）
+
+如果你下载的是 `DouyinMediaStudio-*.zip`：
+
+```powershell
+.\setup.ps1
+```
 
 ## 功能
 
@@ -40,7 +49,7 @@ Douyin Media Studio
 
 ## 首次安装会做什么
 
-`setup.ps1` 会自动：
+安装包内部会调用 `setup.ps1`，自动：
 
 - 克隆底层项目 `jiji262/douyin-downloader`
 - 创建 Python 虚拟环境
@@ -93,3 +102,15 @@ dist/DouyinMediaStudio.exe
 ```
 
 说明：EXE 封装的是桌面窗口和控制台界面；底层下载器和浏览器依赖仍建议用 `setup.ps1` 安装。
+
+## 构建安装包
+
+```powershell
+.\build-installer.ps1
+```
+
+生成：
+
+```text
+release/DouyinMediaStudioSetup-v1.2.0.exe
+```

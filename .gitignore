@@ -4,6 +4,7 @@ downloads/
 dist/
 build/
 release/
+!installer/
 *.spec
 *.log
 .env
