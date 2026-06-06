@@ -1,9 +1,9 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ReleaseDir = Join-Path $ProjectRoot "release"
-$PayloadZip = Join-Path $ReleaseDir "payload-v1.2.1.zip"
-$InstallerExe = Join-Path $ReleaseDir "DouyinMediaStudioSetup-v1.2.1.exe"
+$PayloadZip = Join-Path $ReleaseDir "payload-v1.2.2.zip"
+$InstallerExe = Join-Path $ReleaseDir "DouyinMediaStudioSetup-v1.2.2.exe"
 
 New-Item -ItemType Directory -Path $ReleaseDir -Force | Out-Null
 
@@ -14,6 +14,7 @@ $PayloadItems = @(
     "README.md",
     "requirements.txt",
     "setup.ps1",
+    "CreateDesktopShortcut.ps1",
     "start-desktop.bat",
     "start-web.bat",
     "build-exe.ps1",
@@ -29,14 +30,15 @@ try {
     Compress-Archive -Path $PayloadItems -DestinationPath $PayloadZip -Force
 
     python -m PyInstaller --noconfirm --onefile --console `
-        --name DouyinMediaStudioSetup-v1.2.1 `
+        --name DouyinMediaStudioSetup-v1.2.2 `
         --icon app.ico `
         --add-data "$PayloadZip;." `
         installer_app.py
 
-    Copy-Item -LiteralPath ".\dist\DouyinMediaStudioSetup-v1.2.1.exe" -Destination $InstallerExe -Force
+    Copy-Item -LiteralPath ".\dist\DouyinMediaStudioSetup-v1.2.2.exe" -Destination $InstallerExe -Force
     Get-Item -LiteralPath $InstallerExe
 }
 finally {
     Pop-Location
 }
+

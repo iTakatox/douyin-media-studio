@@ -30,21 +30,8 @@ finally {
 
 python -m pip install -r (Join-Path $ProjectRoot "requirements.txt")
 
-$Desktop = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath = Join-Path $Desktop "Douyin Media Studio.lnk"
-$TargetPath = Join-Path $ProjectRoot "start-desktop.bat"
-$IconPath = Join-Path $ProjectRoot "app.ico"
-
-$Shell = New-Object -ComObject WScript.Shell
-$Shortcut = $Shell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = $TargetPath
-$Shortcut.WorkingDirectory = $ProjectRoot
-if (Test-Path -LiteralPath $IconPath) {
-    $Shortcut.IconLocation = $IconPath
-}
-$Shortcut.Save()
+& (Join-Path $ProjectRoot "CreateDesktopShortcut.ps1")
 
 Write-Host ""
 Write-Host "Setup complete."
-Write-Host "Desktop shortcut created: $ShortcutPath"
 Write-Host "Double-click 'Douyin Media Studio' on your desktop to start."

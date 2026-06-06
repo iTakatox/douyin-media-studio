@@ -69,6 +69,26 @@ Douyin Media Studio
 3. 登录成功后，回到 PowerShell 窗口按 Enter 保存 Cookie。
 4. 重新开始下载。
 
+## 没有桌面图标
+
+如果安装后没有桌面图标，进入安装目录运行：
+
+```powershell
+.\CreateDesktopShortcut.ps1
+```
+
+默认安装目录：
+
+```text
+%LOCALAPPDATA%\Programs\DouyinMediaStudio
+```
+
+安装日志：
+
+```text
+%LOCALAPPDATA%\Programs\DouyinMediaStudio\install.log
+```
+
 ## 开发运行
 
 ```powershell
