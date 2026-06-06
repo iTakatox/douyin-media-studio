@@ -1,0 +1,8 @@
+__pycache__/
+runs/
+downloads/
+dist/
+build/
+*.spec
+*.log
+.env

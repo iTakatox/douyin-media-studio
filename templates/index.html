@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Douyin Media Studio</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">D</div>
+        <div>
+          <h1>Douyin Studio</h1>
+          <p>本地媒体归档工具</p>
+        </div>
+      </div>
+
+      <nav class="nav-stack" aria-label="主要操作">
+        <button id="loginBtn" type="button" class="nav-action">重新登录抖音</button>
+        <button id="extractBtn" type="button" class="nav-action">提取分享链接</button>
+      </nav>
+
+      <div class="side-card">
+        <span>当前状态</span>
+        <strong id="statusPill" class="status-text idle">待开始</strong>
+      </div>
+
+      <div class="side-note">
+        <p>保存结果会自动拆成 <b>mp4</b> 和 <b>images</b> 两个文件夹。</p>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <h2>新建下载任务</h2>
+          <p>直接粘贴整段抖音分享口令；需要登录时点左侧按钮完成 Cookie 更新。</p>
+        </div>
+        <button id="startBtn" type="submit" form="downloadForm" class="primary">开始下载</button>
+      </header>
+
+      <section class="command-panel">
+        <form id="downloadForm" class="form-grid">
+          <label class="field full">
+            <span>抖音分享内容</span>
+            <textarea id="link" rows="5" placeholder="例如：7- 长按复制此条消息，打开抖音搜索，查看TA的更多作品。 https://v.douyin.com/xxxx/ 2@4.com :8pm"></textarea>
+          </label>
+
+          <label class="field full">
+            <span>保存位置</span>
+            <input id="outputDir" value="{{ default_output }}" spellcheck="false">
+          </label>
+
+          <div class="switch-row">
+            <label class="switch">
+              <input id="includeImages" type="checkbox" checked>
+              <span></span>
+              <b>下载图片</b>
+            </label>
+            <div id="hint" class="hint">等待输入分享内容</div>
+          </div>
+        </form>
+      </section>
+
+      <section class="stats-grid">
+        <article class="stat-card">
+          <span>MP4 视频</span>
+          <strong id="mp4Count">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>图片素材</span>
+          <strong id="imageCount">0</strong>
+        </article>
+        <article class="stat-card wide">
+          <span>输出目录</span>
+          <strong id="outputPath">-</strong>
+        </article>
+      </section>
+
+      <section class="log-card">
+        <div class="log-head">
+          <div>
+            <h3>运行日志</h3>
+            <p>下载过程中不要关闭此窗口。</p>
+          </div>
+          <button id="clearLog" type="button" class="ghost">清空</button>
+        </div>
+        <pre id="logs"></pre>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('downloadForm');
+    const startBtn = document.getElementById('startBtn');
+    const extractBtn = document.getElementById('extractBtn');
+    const loginBtn = document.getElementById('loginBtn');
+    const statusPill = document.getElementById('statusPill');
+    const logs = document.getElementById('logs');
+    const mp4Count = document.getElementById('mp4Count');
+    const imageCount = document.getElementById('imageCount');
+    const outputPath = document.getElementById('outputPath');
+    const hint = document.getElementById('hint');
+    let timer = null;
+
+    function setStatus(status) {
+      const labels = {
+        queued: '排队中',
+        running: '下载中',
+        done: '完成',
+        failed: '失败',
+        idle: '待开始'
+      };
+      statusPill.textContent = labels[status] || status;
+      statusPill.className = `status-text ${status}`;
+    }
+
+    function localExtractUrl(text) {
+      const match = (text || '').match(/https?:\/\/[^\s"'<>，。；、）)】]+/);
+      return match ? match[0].replace(/[.,;:!?]+$/, '') : '';
+    }
+
+    function renderJob(job) {
+      setStatus(job.status);
+      outputPath.textContent = job.output_dir || '-';
+      logs.textContent = (job.logs || []).join('\n');
+      logs.scrollTop = logs.scrollHeight;
+
+      if (job.manifest) {
+        mp4Count.textContent = job.manifest.mp4_count || 0;
+        imageCount.textContent = job.manifest.image_count || 0;
+      }
+
+      if (job.status === 'done' || job.status === 'failed') {
+        startBtn.disabled = false;
+        startBtn.textContent = '开始下载';
+        clearInterval(timer);
+      }
+    }
+
+    async function poll(jobId) {
+      const res = await fetch(`/api/status/${jobId}`);
+      const job = await res.json();
+      renderJob(job);
+    }
+
+    extractBtn.addEventListener('click', () => {
+      const text = document.getElementById('link').value;
+      const url = localExtractUrl(text);
+      if (!url) {
+        hint.textContent = '没有找到链接';
+        return;
+      }
+      document.getElementById('link').value = url;
+      hint.textContent = `已提取：${url}`;
+    });
+
+    loginBtn.addEventListener('click', async () => {
+      hint.textContent = '正在打开登录窗口...';
+      const res = await fetch('/api/login-cookies', { method: 'POST' });
+      const data = await res.json();
+      hint.textContent = data.message || '登录窗口已打开';
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const rawText = document.getElementById('link').value.trim();
+      const extracted = localExtractUrl(rawText);
+      if (!extracted) {
+        logs.textContent = '没有找到有效链接，请粘贴包含 https:// 的抖音分享内容。';
+        setStatus('failed');
+        return;
+      }
+
+      const payload = {
+        link: rawText,
+        output_dir: document.getElementById('outputDir').value.trim(),
+        include_images: document.getElementById('includeImages').checked
+      };
+
+      startBtn.disabled = true;
+      startBtn.textContent = '运行中...';
+      setStatus('queued');
+      hint.textContent = `使用链接：${extracted}`;
+      logs.textContent = '';
+      mp4Count.textContent = '0';
+      imageCount.textContent = '0';
+
+      const res = await fetch('/api/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        logs.textContent = data.error || '启动失败';
+        startBtn.disabled = false;
+        startBtn.textContent = '开始下载';
+        setStatus('failed');
+        return;
+      }
+
+      clearInterval(timer);
+      timer = setInterval(() => poll(data.job_id), 1500);
+      poll(data.job_id);
+    });
+
+    document.getElementById('clearLog').addEventListener('click', () => {
+      logs.textContent = '';
+    });
+  </script>
+</body>
+</html>
