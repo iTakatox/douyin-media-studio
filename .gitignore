@@ -3,6 +3,7 @@ runs/
 downloads/
 dist/
 build/
+release/
 *.spec
 *.log
 .env

@@ -1,14 +1,33 @@
 # Douyin Media Studio
 
-一个本地运行的抖音作品归档桌面网页工具。支持直接粘贴整段抖音分享口令，自动提取链接，并把下载结果整理为 `mp4` 和 `images` 两个文件夹。
+一个 Windows 本地桌面应用，用于归档你自己的或已获授权的抖音作品。安装后会在桌面创建图标，双击打开独立应用窗口，不需要手动打开浏览器。
 
 > 仅用于你自己的账号或已获授权的内容。
 
+## 用户下载和安装
+
+1. 打开 Releases 页面，下载最新的 `DouyinMediaStudio-*.zip`。
+2. 解压 ZIP。
+3. 右键 PowerShell 运行：
+
+```powershell
+.\setup.ps1
+```
+
+4. 安装完成后，桌面会出现：
+
+```text
+Douyin Media Studio
+```
+
+5. 双击桌面图标启动。
+
 ## 功能
 
-- 直接粘贴整段抖音分享内容
+- 独立桌面窗口，不需要手动打开浏览器
+- 直接粘贴整段抖音分享口令
 - 自动提取 `https://v.douyin.com/...` 链接
-- 网页按钮打开抖音登录窗口，保存 Cookie
+- 网页内按钮触发抖音重新登录
 - 自动整理输出：
 
 ```text
@@ -19,76 +38,58 @@
   manifest.json
 ```
 
-## 首次安装
+## 首次安装会做什么
 
-需要 Windows、Python、Git。
+`setup.ps1` 会自动：
 
-在 PowerShell 中运行：
-
-```powershell
-.\setup.ps1
-```
-
-安装脚本会自动：
-
-- 克隆 `jiji262/douyin-downloader`
+- 克隆底层项目 `jiji262/douyin-downloader`
 - 创建 Python 虚拟环境
 - 安装下载依赖
 - 安装 Playwright Chromium
-- 安装本网页工具依赖
+- 安装桌面窗口依赖 `pywebview`
+- 创建桌面快捷方式
 
-## 启动
-
-双击：
-
-```text
-start-desktop.bat
-```
-
-或运行：
-
-```powershell
-python app.py
-```
-
-打开地址：
-
-```text
-http://127.0.0.1:5055
-```
+需要 Windows、Python、Git。
 
 ## 登录抖音
 
 如果下载失败并提示 Cookie 失效：
 
-1. 点击网页左侧的“重新登录抖音”。
-2. 在弹出的浏览器里登录抖音。
-3. 登录成功后，回到 PowerShell 窗口按 Enter。
-4. 再重新开始下载。
+1. 点击应用左侧的“重新登录抖音”。
+2. 在弹出的登录窗口里登录抖音。
+3. 登录成功后，回到 PowerShell 窗口按 Enter 保存 Cookie。
+4. 重新开始下载。
 
-## 打包成 EXE
+## 开发运行
 
-可选。运行：
+```powershell
+python desktop_app.py
+```
+
+如果只想用浏览器调试：
+
+```powershell
+python app.py
+```
+
+浏览器地址：
+
+```text
+http://127.0.0.1:5055
+```
+
+## 打包 EXE
+
+可选：
 
 ```powershell
 .\build-exe.ps1
 ```
 
-生成文件：
+生成：
 
 ```text
 dist/DouyinMediaStudio.exe
 ```
 
-注意：EXE 只封装网页控制台本身，底层 `douyin-downloader` 和浏览器依赖仍建议通过 `setup.ps1` 安装。
-
-## 发布到 GitHub
-
-```powershell
-git init -b main
-git add .
-git commit -m "Initial Douyin Media Studio"
-gh repo create douyin-media-studio --private --source . --remote origin --push
-```
-
-如果要公开给别人下载，把 `--private` 改成 `--public`。
+说明：EXE 封装的是桌面窗口和控制台界面；底层下载器和浏览器依赖仍建议用 `setup.ps1` 安装。
