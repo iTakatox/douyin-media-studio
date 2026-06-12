@@ -3,9 +3,12 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
+const net = require("net");
+const crypto = require("crypto");
 
-const PORT = 5055;
 const APP_VERSION = app.getVersion();
+const INSTANCE_TOKEN = crypto.randomBytes(24).toString("hex");
+let backendPort;
 let mainWindow;
 let loginWindow;
 let backend;
@@ -38,13 +41,44 @@ function backendCommand() {
   };
 }
 
+function reservePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(error => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
 function waitForBackend(timeout = 20000) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
     const probe = () => {
-      const request = http.get(`http://127.0.0.1:${PORT}/`, response => {
-        response.resume();
-        resolve();
+      if (backend && backend.exitCode !== null) {
+        reject(new Error(`下载服务启动失败，退出代码 ${backend.exitCode}`));
+        return;
+      }
+      const request = http.get(`http://127.0.0.1:${backendPort}/api/health`, response => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", chunk => { body += chunk; });
+        response.on("end", () => {
+          try {
+            const result = JSON.parse(body);
+            if (response.statusCode === 200 && result.instance_token === INSTANCE_TOKEN) {
+              resolve();
+              return;
+            }
+          } catch (_error) {
+            // The endpoint is not the backend instance started by this process.
+          }
+          if (Date.now() - started > timeout) reject(new Error("下载服务身份校验失败"));
+          else setTimeout(probe, 250);
+        });
       });
       request.on("error", () => {
         if (Date.now() - started > timeout) reject(new Error("下载服务启动超时"));
@@ -58,6 +92,7 @@ function waitForBackend(timeout = 20000) {
 
 async function startBackend() {
   fs.mkdirSync(runtimeDir(), { recursive: true });
+  backendPort = await reservePort();
   const spec = backendCommand();
   backend = spawn(spec.command, spec.args, {
     cwd: spec.cwd,
@@ -66,6 +101,8 @@ async function startBackend() {
       ...process.env,
       DOUYIN_DOWNLOADER_DIR: downloaderDir(),
       DOUYIN_APP_DATA_DIR: runtimeDir(),
+      DOUYIN_PORT: String(backendPort),
+      DOUYIN_INSTANCE_TOKEN: INSTANCE_TOKEN,
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
     },
@@ -147,7 +184,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
-  mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
+  mainWindow.loadURL(`http://127.0.0.1:${backendPort}`);
   mainWindow.webContents.on("did-finish-load", () => {
     mainWindow.webContents.send("app-version", APP_VERSION);
   });

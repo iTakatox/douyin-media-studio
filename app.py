@@ -35,6 +35,7 @@ app = Flask(__name__, template_folder=str(APP_DIR / "templates"), static_folder=
 jobs = {}
 jobs_lock = threading.Lock()
 desktop_api = None
+INSTANCE_TOKEN = os.environ.get("DOUYIN_INSTANCE_TOKEN", "")
 
 
 def extract_first_url(text):
@@ -435,6 +436,11 @@ def index():
     return render_template("index.html", default_output=str(DEFAULT_OUTPUT))
 
 
+@app.route("/api/health")
+def health():
+    return jsonify({"ok": True, "instance_token": INSTANCE_TOKEN})
+
+
 @app.route("/api/scan", methods=["POST"])
 def scan():
     data = request.get_json(force=True)
@@ -516,4 +522,8 @@ def register_desktop_api(api):
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5055, debug=False)
+    app.run(
+        host="127.0.0.1",
+        port=int(os.environ.get("DOUYIN_PORT", "5055")),
+        debug=False,
+    )
