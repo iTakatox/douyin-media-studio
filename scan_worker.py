@@ -44,6 +44,13 @@ def normalize_item(item, fallback_author):
         "collects": stats.get("collect_count"),
         "shares": stats.get("share_count"),
         "is_pinned": bool(item.get("is_top") or item.get("is_pinned")),
+        "platform": "douyin",
+        "platform_label": "抖音",
+        "source_url": (
+            f"https://www.douyin.com/note/{item.get('aweme_id')}"
+            if media_type(item) == "gallery"
+            else f"https://www.douyin.com/video/{item.get('aweme_id')}"
+        ),
     }
 
 

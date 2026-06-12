@@ -1,13 +1,13 @@
 {
   "name": "douyin-media-studio",
-  "version": "2.3.0",
-  "description": "Windows desktop application for archiving authorized Douyin media",
+  "version": "3.0.0",
+  "description": "Windows desktop application for archiving authorized public social media",
   "main": "electron/main.js",
   "author": "iTakatox",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "build:backend": "pyinstaller --noconfirm --clean --onedir --windowed --name DouyinBackend --add-data \"templates;templates\" --add-data \"static;static\" --add-data \"scan_worker.py;.\" --add-data \"comments_worker.py;.\" app.py",
+    "build:backend": "pyinstaller --noconfirm --clean --onedir --windowed --name MediaArchiveBackend --add-data \"templates;templates\" --add-data \"static;static\" --add-data \"scan_worker.py;.\" --add-data \"comments_worker.py;.\" --add-data \"generic_worker.py;.\" --add-data \"platforms.py;.\" app.py",
     "dist": "npm run build:backend && electron-builder --win nsis"
   },
   "devDependencies": {
@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "com.itakatox.douyinmediastudio",
-    "productName": "抖音媒体工作台",
+    "productName": "多平台媒体归档",
     "directories": {
       "output": "release-electron"
     },
@@ -26,7 +26,7 @@
     ],
     "extraResources": [
       {
-        "from": "dist/DouyinBackend",
+        "from": "dist/MediaArchiveBackend",
         "to": "backend"
       },
       {
@@ -41,7 +41,7 @@
     "win": {
       "icon": "app-icon-v2.ico",
       "target": "nsis",
-      "artifactName": "DouyinMediaStudio-Setup-${version}.${ext}"
+      "artifactName": "MediaArchiveStudio-Setup-${version}.${ext}"
     },
     "nsis": {
       "installerIcon": "app-icon-v2.ico",
@@ -51,7 +51,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "抖音媒体工作台",
+      "shortcutName": "多平台媒体归档",
       "runAfterFinish": true
     }
   }

@@ -14,6 +14,8 @@ from pathlib import Path
 import yaml
 from flask import Flask, jsonify, render_template, request
 
+from platforms import detect_platform, platform_details
+
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 INSTALL_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else APP_DIR
@@ -29,7 +31,8 @@ BASE_CONFIG = DOWNLOADER_DIR / "config.yml"
 PYTHON_EXE = DOWNLOADER_DIR / ".venv" / "Scripts" / "python.exe"
 SCAN_WORKER = APP_DIR / "scan_worker.py"
 COMMENTS_WORKER = APP_DIR / "comments_worker.py"
-DEFAULT_OUTPUT = Path.home() / "Downloads" / "抖音作品"
+GENERIC_WORKER = APP_DIR / "generic_worker.py"
+DEFAULT_OUTPUT = Path.home() / "Downloads" / "媒体归档"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 app = Flask(__name__, template_folder=str(APP_DIR / "templates"), static_folder=str(APP_DIR / "static"))
@@ -257,6 +260,92 @@ def run_scan(job_id, link, options):
     except Exception as exc:
         update_job(job_id, status="failed", error=str(exc))
         append_log(job_id, f"扫描失败：{exc}")
+
+
+def run_generic_scan(job_id, link, options, platform_id):
+    try:
+        if not PYTHON_EXE.exists() or not GENERIC_WORKER.exists():
+            raise FileNotFoundError("通用平台组件不完整，请重新安装最新版本。")
+        details = platform_details(platform_id)
+        update_job(
+            job_id,
+            status="scanning",
+            progress=2,
+            platform=platform_id,
+            platform_label=details["label"],
+            anonymous=True,
+        )
+        append_log(job_id, f"匿名优先读取 {details['label']} 公开内容...")
+        env = os.environ.copy()
+        env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+        process = subprocess.Popen(
+            [
+                str(PYTHON_EXE),
+                str(GENERIC_WORKER),
+                "scan",
+                "--url",
+                link,
+                "--limit",
+                str(max(0, int(options.get("limit") or 0))),
+            ],
+            cwd=str(APP_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        update_job(job_id, pid=process.pid)
+        result = None
+        worker_error = ""
+        assert process.stdout is not None
+        for line in process.stdout:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                append_log(job_id, text)
+                continue
+            if event.get("event") == "progress":
+                update_job(job_id, progress=event.get("progress", 10), scanned=event.get("count", 0))
+            elif event.get("event") == "result":
+                result = event
+            elif event.get("event") == "error":
+                worker_error = event.get("message") or ""
+            if event.get("message"):
+                append_log(job_id, event["message"])
+        return_code = process.wait()
+        if job_cancelled(job_id):
+            update_job(job_id, status="canceled", progress=0, error="")
+            append_log(job_id, "任务已停止。")
+            return
+        if return_code != 0 or not result:
+            raise RuntimeError(
+                worker_error
+                or f"{details['label']} 没有返回公开作品。可能需要登录，或当前链接类型暂不支持。"
+            )
+        works = scan_filter(result.get("works") or [], options)
+        update_job(
+            job_id,
+            status="ready",
+            progress=100,
+            author=result.get("author") or "未知作者",
+            expected=result.get("expected", len(works)),
+            works=works,
+            work_count=len(works),
+            resolved_url=result.get("resolved_url") or link,
+            platform=platform_id,
+            platform_label=details["label"],
+            anonymous=True,
+        )
+        append_log(job_id, f"{details['label']} 读取完成，共 {len(works)} 个可选作品。")
+    except Exception as exc:
+        update_job(job_id, status="failed", error=str(exc))
+        append_log(job_id, f"读取失败：{exc}")
 
 
 def run_comments(job_id, selected_works, run_dir, raw_dir, env):
@@ -638,6 +727,95 @@ def run_download(job_id, selected_works, output_dir_text, options):
             shutil.rmtree(raw_dir, ignore_errors=True)
 
 
+def run_generic_download(job_id, selected_works, output_dir_text, options):
+    run_dir = APP_DATA_DIR / "runs" / job_id
+    try:
+        selected_dir = Path(output_dir_text).expanduser().resolve()
+        selected_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        works_path = run_dir / "generic-works.json"
+        works_path.write_text(
+            json.dumps(selected_works, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        env = os.environ.copy()
+        env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+        total = len(selected_works)
+        update_job(
+            job_id,
+            status="running",
+            progress=1,
+            total=total,
+            completed=0,
+            output_dir=str(selected_dir),
+            options=options,
+            platform=selected_works[0].get("platform", "generic"),
+        )
+        process = subprocess.Popen(
+            [
+                str(PYTHON_EXE),
+                str(GENERIC_WORKER),
+                "download",
+                "--works",
+                str(works_path),
+                "--output",
+                str(selected_dir),
+            ],
+            cwd=str(APP_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        update_job(job_id, pid=process.pid)
+        manifest = None
+        worker_error = ""
+        assert process.stdout is not None
+        for line in process.stdout:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                event = json.loads(text)
+            except json.JSONDecodeError:
+                append_log(job_id, text)
+                continue
+            if event.get("event") == "progress":
+                update_job(job_id, progress=event.get("progress", 2))
+            elif event.get("event") == "item":
+                update_job(
+                    job_id,
+                    completed=event.get("completed", 0),
+                    total=event.get("total", total),
+                )
+            elif event.get("event") == "result":
+                manifest = event.get("manifest")
+            elif event.get("event") == "error":
+                worker_error = event.get("message") or ""
+            if event.get("message"):
+                append_log(job_id, event["message"])
+        return_code = process.wait()
+        if job_cancelled(job_id):
+            update_job(job_id, status="canceled", progress=0, error="")
+            append_log(job_id, "任务已停止。")
+            return
+        if return_code != 0 or not manifest:
+            raise RuntimeError(
+                worker_error or "下载失败。该平台可能要求登录，或公开链接已经失效。"
+            )
+        update_job(job_id, status="done", progress=100, manifest=manifest, works=manifest["works"])
+        append_log(job_id, f"整理完成：{manifest['work_count']} 个作品。")
+    except Exception as exc:
+        if job_cancelled(job_id):
+            update_job(job_id, status="canceled", progress=0, error="")
+        else:
+            update_job(job_id, status="failed", error=str(exc))
+            append_log(job_id, f"失败：{exc}")
+
+
 @app.route("/")
 def index():
     return render_template("index.html", default_output=str(DEFAULT_OUTPUT))
@@ -654,11 +832,28 @@ def scan():
     link = extract_first_url(data.get("link") or "")
     options = data.get("options") or {}
     if not link:
-        return jsonify({"error": "没有找到有效的抖音链接。"}), 400
+        return jsonify({"error": "没有找到有效的平台链接。"}), 400
+    platform_id = detect_platform(link)
     job_id = uuid.uuid4().hex[:12]
-    update_job(job_id, kind="scan", status="queued", progress=1, logs=[], works=[])
-    threading.Thread(target=run_scan, args=(job_id, link, options), daemon=True).start()
-    return jsonify({"job_id": job_id, "link": link})
+    update_job(
+        job_id,
+        kind="scan",
+        status="queued",
+        progress=1,
+        logs=[],
+        works=[],
+        platform=platform_id,
+        platform_label=platform_details(platform_id)["label"],
+    )
+    target = run_scan if platform_id == "douyin" else run_generic_scan
+    args = (job_id, link, options) if platform_id == "douyin" else (job_id, link, options, platform_id)
+    threading.Thread(target=target, args=args, daemon=True).start()
+    return jsonify({
+        "job_id": job_id,
+        "link": link,
+        "platform": platform_id,
+        "platform_label": platform_details(platform_id)["label"],
+    })
 
 
 @app.route("/api/start", methods=["POST"])
@@ -672,9 +867,20 @@ def start():
     if not selected_works:
         return jsonify({"error": "请先扫描并至少选择一个作品。"}), 400
     job_id = uuid.uuid4().hex[:12]
-    update_job(job_id, kind="download", status="queued", progress=1, logs=[], works=[])
+    platform_id = selected_works[0].get("platform") or "douyin"
+    update_job(
+        job_id,
+        kind="download",
+        status="queued",
+        progress=1,
+        logs=[],
+        works=[],
+        platform=platform_id,
+        platform_label=platform_details(platform_id)["label"],
+    )
+    target = run_download if platform_id == "douyin" else run_generic_download
     threading.Thread(
-        target=run_download,
+        target=target,
         args=(job_id, selected_works, output_dir, options),
         daemon=True,
     ).start()

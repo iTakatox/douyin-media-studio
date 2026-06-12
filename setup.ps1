@@ -50,6 +50,12 @@ try {
         throw "Playwright installation failed with exit code $LASTEXITCODE."
     }
 
+    Write-Output "Installing the multi-platform media engine..."
+    .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --upgrade yt-dlp
+    if ($LASTEXITCODE -ne 0) {
+        throw "Multi-platform engine installation failed with exit code $LASTEXITCODE."
+    }
+
     Write-Output "Installing the login browser..."
     .\.venv\Scripts\python.exe -m playwright install chromium
     if ($LASTEXITCODE -ne 0) {

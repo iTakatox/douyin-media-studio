@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>抖音媒体工作台</title>
+  <title>多平台媒体归档</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
       <div class="traffic-lights"><i></i><i></i><i></i></div>
       <div class="brand">
         <img src="/static/assets/app-logo.png" alt="">
-        <div><strong>抖音媒体归档</strong><span>授权内容工作台</span></div>
+        <div><strong>多平台媒体归档</strong><span>公开内容工作台</span></div>
       </div>
       <nav>
         <button class="nav-item active" type="button" title="任务概览">
@@ -29,9 +29,9 @@
         </button>
       </nav>
       <div class="sidebar-bottom">
-        <button id="loginBtn" class="nav-item" type="button" title="账号登录">
+        <button id="loginBtn" class="nav-item" type="button" title="抖音账号登录">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
-          <span id="loginState">账号登录</span>
+          <span id="loginState">抖音登录</span>
         </button>
         <div class="version"><i></i><span>本地运行</span></div>
       </div>
@@ -40,8 +40,8 @@
     <main class="workspace">
       <header class="command-bar">
         <div class="page-title">
-          <h1>抖音媒体归档助手</h1>
-          <p>读取、筛选并归档已获授权的作品</p>
+          <h1>多平台媒体归档助手</h1>
+          <p>匿名优先读取并归档本人或已获授权的公开作品</p>
         </div>
         <div class="command-actions">
           <button id="newTaskBtn" class="toolbar-btn" type="button">
@@ -57,14 +57,14 @@
       <section class="top-grid">
         <form id="downloadForm" class="glass-panel task-form">
           <div class="form-title">
-            <div><h2>主页与归档设置</h2><p>保存为：博主名称 / mp4、图片、评论、作品清单.csv</p></div>
+            <div><h2>链接与归档设置 <span id="platformBadge" class="platform-badge">自动识别</span></h2><p id="platformCapability">支持抖音、TikTok、微博、小红书、快手等平台</p></div>
             <button id="cleanLinkBtn" class="quiet-btn" type="button">提取链接</button>
           </div>
           <div class="link-row">
             <label class="input-group wide">
-              <span>抖音主页链接或分享口令</span>
-              <textarea id="link" rows="2" placeholder="粘贴抖音复制的分享内容"></textarea>
-              <small id="linkHint">支持 v.douyin.com 短链接和用户主页链接</small>
+              <span>平台主页、作品链接或分享口令</span>
+              <textarea id="link" rows="2" placeholder="粘贴抖音、TikTok、微博、小红书、快手等分享内容"></textarea>
+              <small id="linkHint">自动识别平台；公开内容优先免登录读取</small>
             </label>
             <div class="settings-column">
               <div class="setting-head">内容类型</div>
@@ -171,7 +171,7 @@
   </div>
 
   <dialog id="loginDialog">
-    <div class="dialog-head"><div><h2>登录抖音</h2><p>登录页面在应用内打开，不需要命令行或其他软件。</p></div><button id="closeDialog" class="icon-btn" type="button">×</button></div>
+    <div class="dialog-head"><div><h2>抖音账号登录</h2><p>仅当抖音主页或评论读取要求登录时使用；其他平台默认先匿名尝试。</p></div><button id="closeDialog" class="icon-btn" type="button">×</button></div>
     <ol><li>点击“打开登录窗口”。</li><li>完成扫码或账号登录。</li><li>返回后点击“我已登录”保存状态。</li></ol>
     <div class="dialog-actions"><button id="openLoginBtn" class="secondary" type="button">打开登录窗口</button><button id="completeLoginBtn" class="primary" type="button">我已登录</button></div>
     <p id="loginMessage"></p>
@@ -186,6 +186,7 @@
     let currentFilter = "all";
     let currentJobId = "";
     let currentAuthor = "";
+    let currentPlatform = "generic";
 
     if (window.desktop?.onVersion) {
       window.desktop.onVersion(version => {
@@ -196,6 +197,50 @@
     function extractUrl(text) {
       const match = (text || "").match(/https?:\/\/[^\s"'<>，。；、）)】]+/);
       return match ? match[0].replace(/[.,;:!?，。；：！？]+$/, "") : "";
+    }
+    function detectPlatform(url) {
+      const value = (url || "").toLowerCase();
+      const platforms = [
+        ["douyin", "抖音", ["douyin.com"]],
+        ["tiktok", "TikTok", ["tiktok.com"]],
+        ["xiaohongshu", "小红书", ["xiaohongshu.com", "xhslink.com", "rednote.com"]],
+        ["weibo", "微博", ["weibo.com", "weibo.cn"]],
+        ["kuaishou", "快手", ["kuaishou.com", "gifshow.com"]],
+        ["youtube", "YouTube", ["youtube.com", "youtu.be"]],
+        ["bilibili", "哔哩哔哩", ["bilibili.com", "b23.tv"]],
+        ["twitter", "X / Twitter", ["twitter.com", "x.com"]],
+        ["instagram", "Instagram", ["instagram.com"]]
+      ];
+      return platforms.find(item => item[2].some(domain => value.includes(domain)))
+        || ["generic", "其他平台", []];
+    }
+    function updatePlatformUi(url, explicitPlatform = "", explicitLabel = "") {
+      const detected = detectPlatform(url);
+      currentPlatform = explicitPlatform || detected[0];
+      const label = explicitLabel || (url ? detected[1] : "自动识别");
+      const isDouyin = currentPlatform === "douyin";
+      $("platformBadge").textContent = label || "自动识别";
+      $("platformBadge").className = `platform-badge ${currentPlatform}`;
+      $("platformCapability").textContent = isDouyin
+        ? "抖音：主页批量、图文、视频及评论归档"
+        : currentPlatform === "tiktok"
+          ? "TikTok：公开主页或单条作品，匿名优先"
+          : currentPlatform === "kuaishou"
+            ? "快手：公开单链接实验性解析，平台限制可能导致失败"
+          : currentPlatform === "xiaohongshu"
+            ? "小红书：公开视频笔记，匿名优先；图文原图适配中"
+          : currentPlatform === "generic"
+            ? "自动识别平台；实际能力取决于公开页面"
+            : `${label}：第一阶段支持公开单链接，匿名优先`;
+      $("downloadComments").disabled = !isDouyin;
+      $("includeCommentReplies").disabled = !isDouyin || !$("downloadComments").checked;
+      $("maxComments").disabled = !isDouyin || !$("downloadComments").checked;
+      $("includePinned").disabled = !isDouyin;
+      if (!isDouyin) {
+        $("downloadComments").checked = false;
+        $("includeCommentReplies").checked = false;
+        $("includePinned").checked = false;
+      }
     }
     function escapeHtml(text) {
       const div = document.createElement("div");
@@ -294,6 +339,7 @@
       $("logs").scrollTop = $("logs").scrollHeight;
       if (job.author) $("authorName").textContent = job.author;
       if (job.author) currentAuthor = job.author;
+      if (job.platform) updatePlatformUi($("link").value, job.platform, job.platform_label);
       if (job.completed !== undefined) $("completedCount").textContent = `${job.completed}/${job.total || 0}`;
       if (job.kind === "scan" && job.status === "ready") {
         scannedWorks = job.works || [];
@@ -362,6 +408,7 @@
       currentResultPath = "";
       currentJobId = "";
       currentAuthor = "";
+      currentPlatform = "generic";
       $("workCount").textContent = "0";
       $("selectedCount").textContent = "0";
       $("completedCount").textContent = "0";
@@ -379,6 +426,7 @@
       updateStats();
       renderWorks();
       if (clearInputs) $("link").value = "";
+      updatePlatformUi(extractUrl($("link").value));
     }
 
     $("cleanLinkBtn").addEventListener("click", () => {
@@ -386,10 +434,12 @@
       if (url) {
         $("link").value = url;
         $("linkHint").textContent = `已提取：${url}`;
+        updatePlatformUi(url);
       } else {
         $("linkHint").textContent = "没有找到有效链接";
       }
     });
+    $("link").addEventListener("input", () => updatePlatformUi(extractUrl($("link").value)));
     $("browseBtn").addEventListener("click", async () => {
       try {
         const path = window.desktop ? await window.desktop.chooseFolder($("outputDir").value) : (await post("/api/select-folder", {current:$("outputDir").value})).path;
@@ -414,7 +464,7 @@
     $("clearTaskBtn").addEventListener("click", () => resetTask(false));
     $("clearLogsBtn").addEventListener("click", () => $("logs").textContent = "日志显示已清空。");
     $("downloadComments").addEventListener("change", () => {
-      const enabled = $("downloadComments").checked;
+      const enabled = $("downloadComments").checked && currentPlatform === "douyin";
       $("includeCommentReplies").disabled = !enabled;
       $("maxComments").disabled = !enabled;
       if (!enabled) $("includeCommentReplies").checked = false;
@@ -435,6 +485,7 @@
         return;
       }
       try {
+        updatePlatformUi(link);
         $("scanBtn").disabled = true;
         $("downloadBtn").disabled = true;
         setListEnabled(false);
@@ -446,6 +497,7 @@
         setProgress(1, "读取进度");
         $("resultMeta").textContent = "正在读取主页作品";
         const data = await post("/api/scan", {link:$("link").value, options:options()});
+        updatePlatformUi(link, data.platform, data.platform_label);
         pollJob(data.job_id);
       } catch (error) {
         setStatus("failed", error.message);
@@ -532,6 +584,7 @@
       }
     });
 
+    updatePlatformUi("");
     $("loginBtn").addEventListener("click", () => $("loginDialog").showModal());
     $("closeDialog").addEventListener("click", () => $("loginDialog").close());
     $("openLoginBtn").addEventListener("click", async () => {

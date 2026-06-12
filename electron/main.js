@@ -8,7 +8,7 @@ const crypto = require("crypto");
 
 const APP_VERSION = app.getVersion();
 const INSTANCE_TOKEN = crypto.randomBytes(24).toString("hex");
-const APP_USER_MODEL_ID = "com.itakatox.douyinmediastudio.v2";
+const APP_USER_MODEL_ID = "com.itakatox.mediaarchivestudio";
 let backendPort;
 let mainWindow;
 let loginWindow;
@@ -30,7 +30,7 @@ function downloaderDir() {
 function backendCommand() {
   if (app.isPackaged) {
     return {
-      command: resourcePath("backend", "DouyinBackend.exe"),
+      command: resourcePath("backend", "MediaArchiveBackend.exe"),
       args: [],
       cwd: resourcePath("backend"),
     };
@@ -121,7 +121,7 @@ function createSetupWindow() {
     width: 680,
     height: 470,
     resizable: false,
-    title: "抖音媒体工作台初始化",
+    title: "多平台媒体归档初始化",
     icon: resourcePath("app-icon-v2.ico"),
     autoHideMenuBar: true,
   });
@@ -146,7 +146,8 @@ function sendSetupLog(line) {
 async function ensureRuntime() {
   const python = path.join(downloaderDir(), ".venv", "Scripts", "python.exe");
   const config = path.join(downloaderDir(), "config.yml");
-  if (fs.existsSync(python) && fs.existsSync(config)) return;
+  const universalEngine = path.join(downloaderDir(), ".venv", "Scripts", "yt-dlp.exe");
+  if (fs.existsSync(python) && fs.existsSync(config) && fs.existsSync(universalEngine)) return;
 
   createSetupWindow();
   await new Promise((resolve, reject) => {
@@ -175,7 +176,7 @@ function createWindow() {
     height: 860,
     minWidth: 1040,
     minHeight: 700,
-    title: "抖音媒体工作台",
+    title: "多平台媒体归档",
     icon: resourcePath("app-icon-v2.ico"),
     autoHideMenuBar: true,
     backgroundColor: "#f3f5f7",
