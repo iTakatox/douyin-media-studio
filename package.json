@@ -1,0 +1,55 @@
+{
+  "name": "douyin-media-studio",
+  "version": "2.0.0",
+  "description": "Windows desktop application for archiving authorized Douyin media",
+  "main": "electron/main.js",
+  "author": "iTakatox",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build:backend": "pyinstaller --noconfirm --clean --onedir --windowed --name DouyinBackend --add-data \"templates;templates\" --add-data \"static;static\" app.py",
+    "dist": "npm run build:backend && electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.itakatox.douyinmediastudio",
+    "productName": "抖音媒体工作台",
+    "directories": {
+      "output": "release-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist/DouyinBackend",
+        "to": "backend"
+      },
+      {
+        "from": "setup.ps1",
+        "to": "setup.ps1"
+      },
+      {
+        "from": "app.ico",
+        "to": "app.ico"
+      }
+    ],
+    "win": {
+      "icon": "app.ico",
+      "target": "nsis",
+      "artifactName": "DouyinMediaStudio-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "抖音媒体工作台",
+      "runAfterFinish": true
+    }
+  }
+}

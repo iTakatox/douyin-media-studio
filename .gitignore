@@ -1,10 +1,9 @@
-__pycache__/
-runs/
-downloads/
-dist/
+node_modules/
 build/
+dist/
 release/
-!installer/
+release-electron/
+runs/
 *.spec
 *.log
-.env
+__pycache__/

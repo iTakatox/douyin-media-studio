@@ -1,34 +1,43 @@
+import csv
 import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
+import sys
 import threading
 import time
 import uuid
-import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 
 
-APP_DIR = Path(__file__).resolve().parent
-WORKSPACE = APP_DIR.parent
-DOWNLOADER_DIR = WORKSPACE / "douyin-downloader"
+APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+INSTALL_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else APP_DIR
+WORKSPACE = INSTALL_DIR.parent
+DOWNLOADER_DIR = Path(os.environ.get("DOUYIN_DOWNLOADER_DIR", WORKSPACE / "douyin-downloader"))
 BASE_CONFIG = DOWNLOADER_DIR / "config.yml"
 PYTHON_EXE = DOWNLOADER_DIR / ".venv" / "Scripts" / "python.exe"
-DEFAULT_OUTPUT = WORKSPACE / "downloads"
+DEFAULT_OUTPUT = Path.home() / "Downloads" / "抖音作品"
+CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder=str(APP_DIR / "templates"), static_folder=str(APP_DIR / "static"))
 jobs = {}
 jobs_lock = threading.Lock()
+desktop_api = None
 
 
 def extract_first_url(text):
     match = re.search(r"https?://[^\s\"'<>，。；、）)】]+", text or "")
-    if not match:
-        return ""
-    return match.group(0).rstrip(".,;:!?")
+    return match.group(0).rstrip(".,;:!?，。；：！？") if match else ""
+
+
+def safe_name(value, fallback="未命名"):
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "")).strip(" .")
+    return (value[:90] or fallback).strip()
 
 
 def safe_job(job_id):
@@ -42,139 +51,247 @@ def update_job(job_id, **updates):
 
 
 def append_log(job_id, line):
+    text = str(line).strip()
+    if not text:
+        return
     with jobs_lock:
         job = jobs.setdefault(job_id, {})
-        job.setdefault("logs", []).append(str(line).rstrip())
-        job["logs"] = job["logs"][-500:]
+        job.setdefault("logs", []).append(text)
+        job["logs"] = job["logs"][-400:]
 
 
-def build_config_text(link, raw_output_dir, include_images):
+def replace_config_value(text, key, value):
+    pattern = rf"(?m)^{re.escape(key)}:\s*.*$"
+    replacement = f"{key}: {value}"
+    return re.sub(pattern, lambda _match: replacement, text)
+
+
+def build_config_text(link, raw_dir, options):
     if not BASE_CONFIG.exists():
-        raise FileNotFoundError(
-            "douyin-downloader/config.yml was not found. Run setup.ps1 first."
+        raise FileNotFoundError("下载组件未安装完整，请重新安装最新版。")
+
+    source = BASE_CONFIG.read_text(encoding="utf-8")
+    source = re.sub(
+        r"(?ms)^link:\s*\n(?:\s+-.*\n?)*",
+        f"link:\n  - {link}\n",
+        source,
+        count=1,
+    )
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    output = json.dumps(str(raw_dir) + os.sep, ensure_ascii=False)
+    db_path = json.dumps(str(raw_dir / "dy_downloader.db"), ensure_ascii=False)
+
+    settings = {
+        "path": output,
+        "music": "false",
+        "cover": "false",
+        "avatar": "false",
+        "json": "false",
+        "folderstyle": "true",
+        "author_dir": '"nickname"',
+        "download_pinned": "true" if options.get("include_pinned") else "false",
+        "database": "true",
+        "database_path": db_path,
+        "start_time": json.dumps(options.get("start_date", "")),
+        "end_time": json.dumps(options.get("end_date", "")),
+        "filename_template": '"{author}-{title}-{id}"',
+        "folder_template": '"{date}_{id}"',
+    }
+    for key, value in settings.items():
+        source = replace_config_value(source, key, value)
+
+    modes = []
+    if options.get("download_videos", True) or options.get("download_images", True):
+        modes.append("post")
+    source = re.sub(r"(?ms)^mode:\s*\n(?:\s+-.*\n?)*", "mode:\n  - post\n", source, count=1)
+    limit = max(0, int(options.get("limit") or 0))
+    source = re.sub(r"(?m)^  post:\s*\d+$", f"  post: {limit}", source)
+
+    media_types = []
+    if options.get("download_videos", True):
+        media_types.append("video")
+    if options.get("download_images", True):
+        media_types.append("gallery")
+    media_block = "media_types:\n" + "".join(f"  - {item}\n" for item in media_types)
+    if re.search(r"(?m)^media_types:", source):
+        source = re.sub(
+            r"(?ms)^media_types:\s*\n(?:\s+-.*\n?)*",
+            media_block,
+            source,
+            count=1,
         )
-    raw_output_dir.mkdir(parents=True, exist_ok=True)
-    source_lines = BASE_CONFIG.read_text(encoding="utf-8").splitlines()
-    lines = []
-    i = 0
-    while i < len(source_lines):
-        line = source_lines[i]
-        if line.strip() == "link:":
-            lines.append("link:")
-            lines.append(f"  - {link}")
-            i += 1
-            while i < len(source_lines) and source_lines[i].lstrip().startswith("- "):
-                i += 1
-            continue
-        lines.append(line)
-        i += 1
+    else:
+        source += "\n" + media_block
+    return source
 
-    text = "\n".join(lines) + "\n"
-    output = str(raw_output_dir) + os.sep
-    db_path = str(raw_output_dir / "dy_downloader.db")
-    image_value = "true" if include_images else "false"
 
-    replacements = [
-        (r"(?m)^path:\s*.*$", f"path: {output}"),
-        (r"(?m)^music:\s*.*$", "music: false"),
-        (r"(?m)^cover:\s*.*$", f"cover: {image_value}"),
-        (r"(?m)^avatar:\s*.*$", f"avatar: {image_value}"),
-        (r"(?m)^json:\s*.*$", "json: false"),
-        (r"(?m)^download_pinned:\s*.*$", "download_pinned: false"),
-        (r"(?m)^database:\s*.*$", "database: true"),
-        (r"(?m)^database_path:\s*.*$", f"database_path: {db_path}"),
-        (r"(?m)^  post:\s*\d+$", "  post: 0"),
-        (r"(?m)^  like:\s*\d+$", "  like: 0"),
-        (r"(?m)^  allmix:\s*\d+$", "  allmix: 0"),
-        (r"(?m)^  mix:\s*\d+$", "  mix: 0"),
-        (r"(?m)^  collect:\s*\d+$", "  collect: 0"),
-        (r"(?m)^  collectmix:\s*\d+$", "  collectmix: 0"),
-    ]
-    for pattern, value in replacements:
-        text = re.sub(pattern, lambda _match, replacement=value: replacement, text)
-    return text
+def load_database_records(db_path):
+    if not db_path.exists():
+        return []
+    connection = sqlite3.connect(str(db_path))
+    try:
+        rows = connection.execute(
+            """
+            SELECT aweme_id, aweme_type, title, author_name, create_time, file_path, metadata
+            FROM aweme ORDER BY create_time DESC
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    records = []
+    for aweme_id, media_type, title, author, create_time, file_path, metadata_text in rows:
+        try:
+            metadata = json.loads(metadata_text or "{}")
+        except json.JSONDecodeError:
+            metadata = {}
+        stats = metadata.get("statistics") or {}
+        records.append(
+            {
+                "aweme_id": str(aweme_id),
+                "media_type": media_type,
+                "title": title or "无标题",
+                "author": author or "未知博主",
+                "create_time": create_time,
+                "source_dir": file_path,
+                "digg_count": stats.get("digg_count"),
+                "comment_count": stats.get("comment_count"),
+                "collect_count": stats.get("collect_count"),
+                "share_count": stats.get("share_count"),
+            }
+        )
+    return records
 
 
 def unique_destination(path):
     if not path.exists():
         return path
-    stem = path.stem
-    suffix = path.suffix
-    parent = path.parent
-    i = 2
-    while True:
-        candidate = parent / f"{stem}_{i}{suffix}"
+    for index in range(2, 10000):
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
         if not candidate.exists():
             return candidate
-        i += 1
+    raise RuntimeError(f"无法生成唯一文件名：{path.name}")
 
 
-def collect_outputs(raw_output_dir, output_dir):
-    mp4_dir = output_dir / "mp4"
-    images_dir = output_dir / "images"
-    mp4_dir.mkdir(parents=True, exist_ok=True)
-    images_dir.mkdir(parents=True, exist_ok=True)
+def find_record_files(raw_dir, record):
+    source_dir = Path(record.get("source_dir") or "")
+    if source_dir.exists():
+        return [path for path in source_dir.iterdir() if path.is_file()]
+    aweme_id = record["aweme_id"]
+    return [path for path in raw_dir.rglob(f"*{aweme_id}*") if path.is_file()]
 
-    image_exts = {".jpg", ".jpeg", ".png", ".webp"}
-    mp4_count = 0
+
+def organize_outputs(raw_dir, selected_dir, options):
+    records = load_database_records(raw_dir / "dy_downloader.db")
+    if not records:
+        return {"author": "", "video_count": 0, "image_count": 0, "works": [], "output_dir": ""}
+
+    author = safe_name(records[0]["author"], "未知博主")
+    author_dir = selected_dir / author
+    video_dir = author_dir / f"{author}-视频"
+    image_dir = author_dir / f"{author}-图文"
+    author_dir.mkdir(parents=True, exist_ok=True)
+    if options.get("download_videos", True):
+        video_dir.mkdir(exist_ok=True)
+    if options.get("download_images", True):
+        image_dir.mkdir(exist_ok=True)
+
+    image_exts = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+    works = []
+    video_count = 0
     image_count = 0
-    mp4_bytes = 0
-    image_bytes = 0
 
-    for file in raw_output_dir.rglob("*"):
-        if not file.is_file():
-            continue
-        if file.suffix.lower() == ".mp4":
-            dest = unique_destination(mp4_dir / file.name)
-            shutil.copy2(file, dest)
-            mp4_count += 1
-            mp4_bytes += dest.stat().st_size
-        elif file.suffix.lower() in image_exts:
-            dest = unique_destination(images_dir / file.name)
-            shutil.copy2(file, dest)
-            image_count += 1
-            image_bytes += dest.stat().st_size
+    for record in records:
+        copied = []
+        title = safe_name(record["title"], "无标题")
+        base_name = safe_name(f"{author}-{title}-{record['aweme_id']}")
+        files = find_record_files(raw_dir, record)
+        if record["media_type"] == "video" and options.get("download_videos", True):
+            videos = [path for path in files if path.suffix.lower() == ".mp4" and "_live_" not in path.stem]
+            for index, source in enumerate(videos, start=1):
+                suffix = "" if len(videos) == 1 else f"-{index}"
+                destination = unique_destination(video_dir / f"{base_name}{suffix}.mp4")
+                shutil.move(str(source), str(destination))
+                copied.append(str(destination))
+                video_count += 1
+        elif record["media_type"] == "gallery" and options.get("download_images", True):
+            images = [path for path in files if path.suffix.lower() in image_exts]
+            for index, source in enumerate(images, start=1):
+                destination = unique_destination(image_dir / f"{base_name}-{index}{source.suffix.lower()}")
+                shutil.move(str(source), str(destination))
+                copied.append(str(destination))
+                image_count += 1
+            live_videos = [path for path in files if path.suffix.lower() == ".mp4"]
+            for index, source in enumerate(live_videos, start=1):
+                destination = unique_destination(image_dir / f"{base_name}-实况-{index}.mp4")
+                shutil.move(str(source), str(destination))
+                copied.append(str(destination))
 
-    manifest = {
-        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "source_raw_dir": str(raw_output_dir),
-        "mp4_count": mp4_count,
-        "image_count": image_count,
-        "mp4_bytes": mp4_bytes,
-        "image_bytes": image_bytes,
-    }
-    with (output_dir / "manifest.json").open("w", encoding="utf-8") as f:
-        json.dump(manifest, f, ensure_ascii=False, indent=2)
-    return manifest
-
-
-def run_download(job_id, link, output_dir_text, include_images):
-    try:
-        output_dir = Path(output_dir_text).expanduser()
-        if not output_dir.is_absolute():
-            output_dir = WORKSPACE / output_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        raw_output_dir = output_dir / "_raw"
-        run_dir = APP_DIR / "runs" / job_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        config_path = run_dir / "config.yml"
-        config_path.write_text(
-            build_config_text(link, raw_output_dir, include_images),
-            encoding="utf-8",
+        publish_date = ""
+        if record.get("create_time"):
+            publish_date = datetime.fromtimestamp(record["create_time"]).strftime("%Y-%m-%d %H:%M")
+        works.append(
+            {
+                "date": publish_date,
+                "title": record["title"],
+                "type": "视频" if record["media_type"] == "video" else "图文",
+                "digg": record.get("digg_count"),
+                "comments": record.get("comment_count"),
+                "collects": record.get("collect_count"),
+                "shares": record.get("share_count"),
+                "aweme_id": record["aweme_id"],
+                "files": copied,
+                "status": "已下载" if copied else "已跳过",
+            }
         )
 
-        update_job(job_id, status="running", output_dir=str(output_dir))
-        append_log(job_id, f"Output directory: {output_dir}")
-        append_log(job_id, "Download started. Complete browser login/verification if prompted.")
+    csv_path = author_dir / "作品清单.csv"
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["发布日期", "标题", "类型", "点赞", "评论", "收藏", "分享", "作品ID", "本地文件"])
+        for item in works:
+            writer.writerow(
+                [
+                    item["date"],
+                    item["title"],
+                    item["type"],
+                    item["digg"],
+                    item["comments"],
+                    item["collects"],
+                    item["shares"],
+                    item["aweme_id"],
+                    " | ".join(item["files"]),
+                ]
+            )
+
+    return {
+        "author": author,
+        "video_count": video_count,
+        "image_count": image_count,
+        "work_count": len(works),
+        "works": works,
+        "output_dir": str(author_dir),
+        "csv_path": str(csv_path),
+    }
+
+
+def run_download(job_id, link, output_dir_text, options):
+    run_dir = INSTALL_DIR / "runs" / job_id
+    raw_dir = run_dir / "download"
+    try:
+        selected_dir = Path(output_dir_text).expanduser().resolve()
+        selected_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        config_path = run_dir / "config.yml"
+        config_path.write_text(build_config_text(link, raw_dir, options), encoding="utf-8")
+
+        update_job(job_id, status="running", progress=8, output_dir=str(selected_dir))
+        append_log(job_id, "正在读取博主主页和作品列表...")
+        if not PYTHON_EXE.exists():
+            raise FileNotFoundError("下载组件未安装完整，请重新安装最新版。")
 
         env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
-        env["PYTHONUTF8"] = "1"
-        if not PYTHON_EXE.exists():
-            raise FileNotFoundError(
-                "douyin-downloader virtual environment was not found. Run setup.ps1 first."
-            )
+        env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         process = subprocess.Popen(
             [str(PYTHON_EXE), "run.py", "-c", str(config_path)],
             cwd=str(DOWNLOADER_DIR),
@@ -184,25 +301,34 @@ def run_download(job_id, link, output_dir_text, include_images):
             encoding="utf-8",
             errors="replace",
             env=env,
+            creationflags=CREATE_NO_WINDOW,
         )
-        update_job(job_id, pid=process.pid)
-
+        update_job(job_id, pid=process.pid, progress=16)
         assert process.stdout is not None
         for line in process.stdout:
             append_log(job_id, line)
+            job = safe_job(job_id)
+            update_job(job_id, progress=min(86, int(job.get("progress", 16)) + 1))
 
         return_code = process.wait()
-        append_log(job_id, f"Download process exited with code: {return_code}")
+        if return_code != 0:
+            raise RuntimeError(f"下载组件返回错误代码 {return_code}，请查看运行日志。")
 
-        manifest = collect_outputs(raw_output_dir, output_dir)
-        status = "done" if return_code == 0 and manifest["mp4_count"] > 0 else "failed"
-        update_job(job_id, status=status, manifest=manifest)
-        append_log(job_id, f"Collected: {manifest['mp4_count']} mp4, {manifest['image_count']} images.")
-        if manifest["mp4_count"] == 0:
-            append_log(job_id, "No mp4 files were collected. Check Douyin login cookies or link visibility.")
+        update_job(job_id, progress=90)
+        append_log(job_id, "下载完成，正在整理视频、图文和作品表格...")
+        manifest = organize_outputs(raw_dir, selected_dir, options)
+        if not manifest["works"]:
+            raise RuntimeError("没有读取到作品。请确认已登录、链接可访问，并检查日期或数量限制。")
+
+        update_job(job_id, status="done", progress=100, manifest=manifest, works=manifest["works"])
+        append_log(job_id, f"整理完成：{manifest['video_count']} 个视频，{manifest['image_count']} 张图文图片。")
+        append_log(job_id, f"保存位置：{manifest['output_dir']}")
     except Exception as exc:
         update_job(job_id, status="failed", error=str(exc))
-        append_log(job_id, f"Error: {exc}")
+        append_log(job_id, f"失败：{exc}")
+    finally:
+        if raw_dir.exists():
+            shutil.rmtree(raw_dir, ignore_errors=True)
 
 
 @app.route("/")
@@ -213,66 +339,72 @@ def index():
 @app.route("/api/start", methods=["POST"])
 def start():
     data = request.get_json(force=True)
-    raw_link = (data.get("link") or "").strip()
-    link = extract_first_url(raw_link)
+    link = extract_first_url(data.get("link") or "")
     output_dir = (data.get("output_dir") or str(DEFAULT_OUTPUT)).strip()
-    include_images = bool(data.get("include_images", True))
-
-    if not link.startswith(("http://", "https://")):
-        return jsonify({"error": "No valid URL was found in the pasted text."}), 400
+    options = data.get("options") or {}
+    if not link:
+        return jsonify({"error": "没有找到有效的抖音链接。"}), 400
     if not output_dir:
-        return jsonify({"error": "Please enter an output directory."}), 400
+        return jsonify({"error": "请选择保存位置。"}), 400
+    if not options.get("download_videos", True) and not options.get("download_images", True):
+        return jsonify({"error": "至少选择“视频”或“图文”中的一项。"}), 400
 
     job_id = uuid.uuid4().hex[:12]
-    update_job(job_id, status="queued", logs=[], output_dir=output_dir)
-    thread = threading.Thread(
+    update_job(job_id, status="queued", progress=2, logs=[], output_dir=output_dir, works=[])
+    threading.Thread(
         target=run_download,
-        args=(job_id, link, output_dir, include_images),
+        args=(job_id, link, output_dir, options),
         daemon=True,
-    )
-    thread.start()
-    return jsonify({"job_id": job_id})
-
-
-@app.route("/api/extract-link", methods=["POST"])
-def extract_link():
-    data = request.get_json(force=True)
-    link = extract_first_url(data.get("text") or "")
-    if not link:
-        return jsonify({"error": "No valid URL found."}), 400
-    return jsonify({"link": link})
-
-
-@app.route("/api/login-cookies", methods=["POST"])
-def login_cookies():
-    if not PYTHON_EXE.exists():
-        return jsonify({"error": "Downloader environment not found. Run setup.ps1 first."}), 500
-    command = (
-        "$env:PYTHONIOENCODING='utf-8'; "
-        "$env:PYTHONUTF8='1'; "
-        ".\\.venv\\Scripts\\python.exe -m tools.cookie_fetcher --config config.yml"
-    )
-    subprocess.Popen(
-        [
-            "powershell",
-            "-NoExit",
-            "-Command",
-            command,
-        ],
-        cwd=str(DOWNLOADER_DIR),
-        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
-    )
-    return jsonify({"ok": True, "message": "Douyin login window opened."})
+    ).start()
+    return jsonify({"job_id": job_id, "link": link})
 
 
 @app.route("/api/status/<job_id>")
 def status(job_id):
     job = safe_job(job_id)
-    if not job:
-        return jsonify({"error": "Job not found."}), 404
-    return jsonify(job)
+    return jsonify(job) if job else (jsonify({"error": "任务不存在。"}), 404)
+
+
+@app.route("/api/select-folder", methods=["POST"])
+def select_folder():
+    current = (request.get_json(silent=True) or {}).get("current") or str(DEFAULT_OUTPUT)
+    if desktop_api:
+        selected = desktop_api.choose_folder(current)
+        return jsonify({"path": selected or current})
+    return jsonify({"path": current})
+
+
+@app.route("/api/open-folder", methods=["POST"])
+def open_folder():
+    path = (request.get_json(force=True).get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "目录为空。"}), 400
+    target = Path(path)
+    target.mkdir(parents=True, exist_ok=True)
+    os.startfile(str(target))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/login", methods=["POST"])
+def login():
+    if not desktop_api:
+        return jsonify({"error": "登录功能仅在桌面程序中可用。"}), 400
+    threading.Thread(target=desktop_api.open_login, daemon=True).start()
+    return jsonify({"ok": True, "message": "登录窗口已在应用内打开。登录完成后点击“我已登录”。"})
+
+
+@app.route("/api/login/complete", methods=["POST"])
+def login_complete():
+    if not desktop_api:
+        return jsonify({"error": "登录功能仅在桌面程序中可用。"}), 400
+    count = desktop_api.save_login_cookies()
+    return jsonify({"ok": True, "message": f"登录信息已保存（{count} 项 Cookie）。"})
+
+
+def register_desktop_api(api):
+    global desktop_api
+    desktop_api = api
 
 
 if __name__ == "__main__":
-    threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:5055")).start()
     app.run(host="127.0.0.1", port=5055, debug=False)

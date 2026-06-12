@@ -2,13 +2,11 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $WorkspaceRoot = Split-Path -Parent $ProjectRoot
-$DownloaderDir = Join-Path $WorkspaceRoot "douyin-downloader"
+$DownloaderDir = if ($env:DOUYIN_DOWNLOADER_DIR) { $env:DOUYIN_DOWNLOADER_DIR } else { Join-Path $WorkspaceRoot "douyin-downloader" }
 
-Write-Host "Installing Douyin Media Studio..."
-
+Write-Output "检查下载组件..."
 if (-not (Test-Path -LiteralPath $DownloaderDir)) {
-    Write-Host "Cloning douyin-downloader..."
-    git clone https://github.com/jiji262/douyin-downloader.git $DownloaderDir
+    git clone --depth 1 https://github.com/jiji262/douyin-downloader.git $DownloaderDir
 }
 
 Push-Location $DownloaderDir
@@ -16,8 +14,10 @@ try {
     if (-not (Test-Path -LiteralPath ".\.venv\Scripts\python.exe")) {
         python -m venv .venv
     }
-    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-    .\.venv\Scripts\python.exe -m pip install playwright
+    Write-Output "安装 Python 依赖..."
+    .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check -r requirements.txt
+    .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check playwright
+    Write-Output "安装登录浏览器组件..."
     .\.venv\Scripts\python.exe -m playwright install chromium
 
     if (-not (Test-Path -LiteralPath ".\config.yml")) {
@@ -28,10 +28,4 @@ finally {
     Pop-Location
 }
 
-python -m pip install -r (Join-Path $ProjectRoot "requirements.txt")
-
-& (Join-Path $ProjectRoot "CreateDesktopShortcut.ps1")
-
-Write-Host ""
-Write-Host "Setup complete."
-Write-Host "Double-click 'Douyin Media Studio' on your desktop to start."
+Write-Output "下载组件安装完成。"

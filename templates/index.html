@@ -3,212 +3,333 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Douyin Media Studio</title>
+  <title>抖音媒体工作台</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="app-shell">
+  <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">D</div>
-        <div>
-          <h1>Douyin Studio</h1>
-          <p>本地媒体归档工具</p>
-        </div>
+        <div><strong>抖音媒体工作台</strong><span>本地作品归档</span></div>
       </div>
-
-      <nav class="nav-stack" aria-label="主要操作">
-        <button id="loginBtn" type="button" class="nav-action">重新登录抖音</button>
-        <button id="extractBtn" type="button" class="nav-action">提取分享链接</button>
+      <nav>
+        <button class="nav-item active" type="button" data-view="task">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>
+          下载任务
+        </button>
+        <button class="nav-item" type="button" data-view="library">
+          <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>
+          本次作品
+        </button>
       </nav>
-
-      <div class="side-card">
-        <span>当前状态</span>
-        <strong id="statusPill" class="status-text idle">待开始</strong>
+      <div class="account">
+        <div class="account-state"><i></i><span id="loginState">登录状态待确认</span></div>
+        <button id="loginBtn" class="secondary full" type="button">登录 / 更新账号</button>
       </div>
-
-      <div class="side-note">
-        <p>保存结果会自动拆成 <b>mp4</b> 和 <b>images</b> 两个文件夹。</p>
-      </div>
+      <div class="legal">仅用于本人账号或已获授权内容</div>
     </aside>
 
-    <section class="workspace">
+    <main class="workspace">
       <header class="topbar">
         <div>
-          <h2>新建下载任务</h2>
-          <p>直接粘贴整段抖音分享口令；需要登录时点左侧按钮完成 Cookie 更新。</p>
+          <h1>下载任务</h1>
+          <p>粘贴博主主页分享内容，作品会按博主和类型自动归档。</p>
         </div>
-        <button id="startBtn" type="submit" form="downloadForm" class="primary">开始下载</button>
+        <div class="status" id="status"><span></span><b>等待任务</b></div>
       </header>
 
-      <section class="command-panel">
-        <form id="downloadForm" class="form-grid">
-          <label class="field full">
-            <span>抖音分享内容</span>
-            <textarea id="link" rows="5" placeholder="例如：7- 长按复制此条消息，打开抖音搜索，查看TA的更多作品。 https://v.douyin.com/xxxx/ 2@4.com :8pm"></textarea>
-          </label>
+      <section class="task-layout">
+        <div class="form-area">
+          <form id="downloadForm">
+            <div class="field">
+              <div class="field-head">
+                <label for="link">抖音主页链接或完整分享口令</label>
+                <button id="cleanLinkBtn" class="text-btn" type="button">只保留链接</button>
+              </div>
+              <textarea id="link" rows="4" placeholder="把抖音复制的整段分享内容粘贴到这里"></textarea>
+              <small id="linkHint">支持 v.douyin.com 短链接和 douyin.com 用户主页链接</small>
+            </div>
 
-          <label class="field full">
-            <span>保存位置</span>
-            <input id="outputDir" value="{{ default_output }}" spellcheck="false">
-          </label>
+            <div class="field">
+              <label for="outputDir">保存位置</label>
+              <div class="path-row">
+                <input id="outputDir" value="{{ default_output }}" spellcheck="false">
+                <button id="browseBtn" class="icon-btn" type="button" title="选择文件夹">
+                  <svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></svg>
+                </button>
+                <button id="openFolderBtn" class="icon-btn" type="button" title="打开文件夹">
+                  <svg viewBox="0 0 24 24"><path d="M14 4h6v6m0-6-9 9M19 13v7H4V5h7"/></svg>
+                </button>
+              </div>
+              <small>最终会自动创建“博主名称 / 博主名称-视频 / 博主名称-图文”。</small>
+            </div>
 
-          <div class="switch-row">
-            <label class="switch">
-              <input id="includeImages" type="checkbox" checked>
-              <span></span>
-              <b>下载图片</b>
-            </label>
-            <div id="hint" class="hint">等待输入分享内容</div>
-          </div>
-        </form>
-      </section>
+            <div class="options-grid">
+              <fieldset>
+                <legend>下载内容</legend>
+                <label class="check-row"><input id="downloadVideos" type="checkbox" checked><span>视频作品</span></label>
+                <label class="check-row"><input id="downloadImages" type="checkbox" checked><span>图文作品</span></label>
+                <label class="check-row"><input id="includePinned" type="checkbox"><span>包含置顶作品</span></label>
+              </fieldset>
+              <fieldset>
+                <legend>作品范围</legend>
+                <label class="compact-field"><span>最多下载</span><input id="limit" type="number" min="0" value="0"><em>0 表示全部</em></label>
+                <div class="date-row">
+                  <label><span>开始日期</span><input id="startDate" type="date"></label>
+                  <label><span>结束日期</span><input id="endDate" type="date"></label>
+                </div>
+              </fieldset>
+            </div>
 
-      <section class="stats-grid">
-        <article class="stat-card">
-          <span>MP4 视频</span>
-          <strong id="mp4Count">0</strong>
-        </article>
-        <article class="stat-card">
-          <span>图片素材</span>
-          <strong id="imageCount">0</strong>
-        </article>
-        <article class="stat-card wide">
-          <span>输出目录</span>
-          <strong id="outputPath">-</strong>
-        </article>
-      </section>
-
-      <section class="log-card">
-        <div class="log-head">
-          <div>
-            <h3>运行日志</h3>
-            <p>下载过程中不要关闭此窗口。</p>
-          </div>
-          <button id="clearLog" type="button" class="ghost">清空</button>
+            <div class="action-row">
+              <button id="startBtn" class="primary" type="submit">
+                <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>
+                开始下载
+              </button>
+              <span id="actionHint">任务运行时可以在下方查看作品和日志。</span>
+            </div>
+          </form>
         </div>
-        <pre id="logs"></pre>
+
+        <aside class="summary">
+          <h2>任务概览</h2>
+          <div class="summary-row"><span>博主</span><strong id="authorName">待识别</strong></div>
+          <div class="summary-row"><span>作品</span><strong id="workCount">0</strong></div>
+          <div class="summary-row"><span>视频</span><strong id="videoCount">0</strong></div>
+          <div class="summary-row"><span>图文图片</span><strong id="imageCount">0</strong></div>
+          <div class="progress-wrap">
+            <div class="progress-label"><span>任务进度</span><b id="progressText">0%</b></div>
+            <div class="progress"><i id="progressBar"></i></div>
+          </div>
+          <button id="resultFolderBtn" class="secondary full" type="button" disabled>打开结果目录</button>
+        </aside>
       </section>
-    </section>
-  </main>
+
+      <section class="results">
+        <div class="tabs">
+          <button class="tab active" type="button" data-tab="works">作品列表</button>
+          <button class="tab" type="button" data-tab="logs">运行日志</button>
+          <div class="result-meta" id="resultMeta">尚未开始下载</div>
+        </div>
+        <div id="worksPanel" class="tab-panel active">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>日期</th><th>标题</th><th>类型</th><th>点赞</th><th>评论</th><th>收藏</th><th>状态</th></tr></thead>
+              <tbody id="worksBody">
+                <tr class="empty-row"><td colspan="7">下载完成后，作品信息会显示在这里</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div id="logsPanel" class="tab-panel"><pre id="logs">等待任务...</pre></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="loginDialog">
+    <div class="dialog-head"><div><h2>登录抖音</h2><p>登录页会在应用内打开，不需要命令行。</p></div><button id="closeDialog" class="icon-btn" type="button">×</button></div>
+    <ol><li>点击“打开登录窗口”。</li><li>在新窗口中完成扫码或账号登录。</li><li>回到这里点击“我已登录”，保存登录状态。</li></ol>
+    <div class="dialog-actions"><button id="openLoginBtn" class="secondary" type="button">打开登录窗口</button><button id="completeLoginBtn" class="primary" type="button">我已登录</button></div>
+    <p id="loginMessage"></p>
+  </dialog>
 
   <script>
-    const form = document.getElementById('downloadForm');
-    const startBtn = document.getElementById('startBtn');
-    const extractBtn = document.getElementById('extractBtn');
-    const loginBtn = document.getElementById('loginBtn');
-    const statusPill = document.getElementById('statusPill');
-    const logs = document.getElementById('logs');
-    const mp4Count = document.getElementById('mp4Count');
-    const imageCount = document.getElementById('imageCount');
-    const outputPath = document.getElementById('outputPath');
-    const hint = document.getElementById('hint');
+    const $ = (id) => document.getElementById(id);
     let timer = null;
+    let currentResultPath = "";
 
-    function setStatus(status) {
-      const labels = {
-        queued: '排队中',
-        running: '下载中',
-        done: '完成',
-        failed: '失败',
-        idle: '待开始'
-      };
-      statusPill.textContent = labels[status] || status;
-      statusPill.className = `status-text ${status}`;
+    function extractUrl(text) {
+      const match = (text || "").match(/https?:\/\/[^\s"'<>，。；、）)】]+/);
+      return match ? match[0].replace(/[.,;:!?，。；：！？]+$/, "") : "";
     }
 
-    function localExtractUrl(text) {
-      const match = (text || '').match(/https?:\/\/[^\s"'<>，。；、）)】]+/);
-      return match ? match[0].replace(/[.,;:!?]+$/, '') : '';
+    function formatNumber(value) {
+      if (value === null || value === undefined || value === "") return "-";
+      const n = Number(value);
+      if (n >= 10000) return `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}万`;
+      return n.toLocaleString("zh-CN");
+    }
+
+    function setStatus(status, error) {
+      const labels = {queued: "准备中", running: "下载中", done: "已完成", failed: "任务失败", idle: "等待任务"};
+      const node = $("status");
+      node.className = `status ${status || "idle"}`;
+      node.querySelector("b").textContent = error || labels[status] || "等待任务";
+    }
+
+    function setProgress(value) {
+      const progress = Math.max(0, Math.min(100, Number(value || 0)));
+      $("progressBar").style.width = `${progress}%`;
+      $("progressText").textContent = `${progress}%`;
+    }
+
+    function renderWorks(works) {
+      if (!works || !works.length) {
+        $("worksBody").innerHTML = '<tr class="empty-row"><td colspan="7">暂无作品数据</td></tr>';
+        return;
+      }
+      $("worksBody").innerHTML = works.map(item => `
+        <tr>
+          <td>${item.date || "-"}</td>
+          <td class="title-cell" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</td>
+          <td><span class="type-tag ${item.type === "视频" ? "video" : "gallery"}">${item.type}</span></td>
+          <td>${formatNumber(item.digg)}</td>
+          <td>${formatNumber(item.comments)}</td>
+          <td>${formatNumber(item.collects)}</td>
+          <td><span class="done-dot"></span>${item.status}</td>
+        </tr>`).join("");
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text || "";
+      return div.innerHTML;
     }
 
     function renderJob(job) {
-      setStatus(job.status);
-      outputPath.textContent = job.output_dir || '-';
-      logs.textContent = (job.logs || []).join('\n');
-      logs.scrollTop = logs.scrollHeight;
-
+      setStatus(job.status, job.status === "failed" ? job.error : "");
+      setProgress(job.progress);
+      $("logs").textContent = (job.logs || []).join("\n") || "等待任务...";
+      $("logs").scrollTop = $("logs").scrollHeight;
       if (job.manifest) {
-        mp4Count.textContent = job.manifest.mp4_count || 0;
-        imageCount.textContent = job.manifest.image_count || 0;
+        const m = job.manifest;
+        $("authorName").textContent = m.author || "未知";
+        $("workCount").textContent = m.work_count || 0;
+        $("videoCount").textContent = m.video_count || 0;
+        $("imageCount").textContent = m.image_count || 0;
+        $("resultMeta").textContent = `表格已保存：${m.csv_path || ""}`;
+        currentResultPath = m.output_dir || "";
+        $("resultFolderBtn").disabled = !currentResultPath;
+        renderWorks(m.works);
       }
-
-      if (job.status === 'done' || job.status === 'failed') {
-        startBtn.disabled = false;
-        startBtn.textContent = '开始下载';
+      if (["done", "failed"].includes(job.status)) {
         clearInterval(timer);
+        $("startBtn").disabled = false;
+        $("startBtn").lastChild.textContent = " 开始下载";
       }
     }
 
-    async function poll(jobId) {
-      const res = await fetch(`/api/status/${jobId}`);
-      const job = await res.json();
-      renderJob(job);
+    async function post(url, body = {}) {
+      const response = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "操作失败");
+      return data;
     }
 
-    extractBtn.addEventListener('click', () => {
-      const text = document.getElementById('link').value;
-      const url = localExtractUrl(text);
-      if (!url) {
-        hint.textContent = '没有找到链接';
-        return;
+    function hasDesktopApi() {
+      return Boolean(window.desktop);
+    }
+
+    $("cleanLinkBtn").addEventListener("click", () => {
+      const url = extractUrl($("link").value);
+      if (url) {
+        $("link").value = url;
+        $("linkHint").textContent = `已提取：${url}`;
+      } else {
+        $("linkHint").textContent = "没有找到有效链接";
       }
-      document.getElementById('link').value = url;
-      hint.textContent = `已提取：${url}`;
     });
 
-    loginBtn.addEventListener('click', async () => {
-      hint.textContent = '正在打开登录窗口...';
-      const res = await fetch('/api/login-cookies', { method: 'POST' });
-      const data = await res.json();
-      hint.textContent = data.message || '登录窗口已打开';
+    $("browseBtn").addEventListener("click", async () => {
+      try {
+        if (hasDesktopApi()) {
+          const path = await window.desktop.chooseFolder($("outputDir").value);
+          if (path) $("outputDir").value = path;
+        } else {
+          const data = await post("/api/select-folder", {current: $("outputDir").value});
+          $("outputDir").value = data.path;
+        }
+      } catch (error) { $("actionHint").textContent = error.message; }
     });
 
-    form.addEventListener('submit', async (event) => {
+    async function openFolder(path) {
+      try {
+        if (hasDesktopApi()) await window.desktop.openFolder(path);
+        else await post("/api/open-folder", {path});
+      }
+      catch (error) { $("actionHint").textContent = error.message; }
+    }
+    $("openFolderBtn").addEventListener("click", () => openFolder($("outputDir").value));
+    $("resultFolderBtn").addEventListener("click", () => openFolder(currentResultPath));
+
+    $("downloadForm").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const rawText = document.getElementById('link').value.trim();
-      const extracted = localExtractUrl(rawText);
-      if (!extracted) {
-        logs.textContent = '没有找到有效链接，请粘贴包含 https:// 的抖音分享内容。';
-        setStatus('failed');
+      const link = extractUrl($("link").value);
+      if (!link) {
+        setStatus("failed", "未找到有效链接");
+        $("link").focus();
         return;
       }
-
       const payload = {
-        link: rawText,
-        output_dir: document.getElementById('outputDir').value.trim(),
-        include_images: document.getElementById('includeImages').checked
+        link: $("link").value,
+        output_dir: $("outputDir").value,
+        options: {
+          download_videos: $("downloadVideos").checked,
+          download_images: $("downloadImages").checked,
+          include_pinned: $("includePinned").checked,
+          limit: Number($("limit").value || 0),
+          start_date: $("startDate").value,
+          end_date: $("endDate").value
+        }
       };
-
-      startBtn.disabled = true;
-      startBtn.textContent = '运行中...';
-      setStatus('queued');
-      hint.textContent = `使用链接：${extracted}`;
-      logs.textContent = '';
-      mp4Count.textContent = '0';
-      imageCount.textContent = '0';
-
-      const res = await fetch('/api/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        logs.textContent = data.error || '启动失败';
-        startBtn.disabled = false;
-        startBtn.textContent = '开始下载';
-        setStatus('failed');
-        return;
+      try {
+        $("startBtn").disabled = true;
+        setStatus("queued");
+        setProgress(2);
+        $("resultMeta").textContent = `正在处理：${link}`;
+        const data = await post("/api/start", payload);
+        clearInterval(timer);
+        const poll = async () => {
+          const response = await fetch(`/api/status/${data.job_id}`);
+          renderJob(await response.json());
+        };
+        timer = setInterval(poll, 1200);
+        poll();
+      } catch (error) {
+        setStatus("failed", error.message);
+        $("startBtn").disabled = false;
       }
-
-      clearInterval(timer);
-      timer = setInterval(() => poll(data.job_id), 1500);
-      poll(data.job_id);
     });
 
-    document.getElementById('clearLog').addEventListener('click', () => {
-      logs.textContent = '';
+    document.querySelectorAll(".tab").forEach(button => button.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === button));
+      $("worksPanel").classList.toggle("active", button.dataset.tab === "works");
+      $("logsPanel").classList.toggle("active", button.dataset.tab === "logs");
+    }));
+
+    document.querySelectorAll(".nav-item").forEach(button => button.addEventListener("click", () => {
+      document.querySelectorAll(".nav-item").forEach(item => item.classList.toggle("active", item === button));
+      if (button.dataset.view === "library") document.querySelector('[data-tab="works"]').click();
+    }));
+
+    $("loginBtn").addEventListener("click", () => $("loginDialog").showModal());
+    $("closeDialog").addEventListener("click", () => $("loginDialog").close());
+    $("openLoginBtn").addEventListener("click", async () => {
+      try {
+        if (hasDesktopApi()) {
+          await window.desktop.openLogin();
+          $("loginMessage").textContent = "登录窗口已打开。登录完成后回到这里继续。";
+        } else {
+          const data = await post("/api/login");
+          $("loginMessage").textContent = data.message;
+        }
+      } catch (error) { $("loginMessage").textContent = error.message; }
+    });
+    $("completeLoginBtn").addEventListener("click", async () => {
+      try {
+        let message;
+        if (hasDesktopApi()) {
+          const count = await window.desktop.saveLogin();
+          message = `登录信息已保存（${count} 项 Cookie）。`;
+        } else {
+          const data = await post("/api/login/complete");
+          message = data.message;
+        }
+        $("loginMessage").textContent = message;
+        $("loginState").textContent = "登录信息已保存";
+        $("account").classList.add("connected");
+      } catch (error) { $("loginMessage").textContent = error.message; }
     });
   </script>
 </body>
