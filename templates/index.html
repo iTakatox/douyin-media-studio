@@ -139,6 +139,13 @@
     let timer = null;
     let currentResultPath = "";
 
+    if (window.desktop && window.desktop.onVersion) {
+      window.desktop.onVersion(version => {
+        const legal = document.querySelector(".legal");
+        if (legal) legal.insertAdjacentHTML("beforeend", `<br>Version ${version}`);
+      });
+    }
+
     function extractUrl(text) {
       const match = (text || "").match(/https?:\/\/[^\s"'<>，。；、）)】]+/);
       return match ? match[0].replace(/[.,;:!?，。；：！？]+$/, "") : "";

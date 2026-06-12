@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
+import yaml
 
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -66,69 +67,44 @@ def append_log(job_id, line):
         job["logs"] = job["logs"][-400:]
 
 
-def replace_config_value(text, key, value):
-    pattern = rf"(?m)^{re.escape(key)}:\s*.*$"
-    replacement = f"{key}: {value}"
-    return re.sub(pattern, lambda _match: replacement, text)
-
-
 def build_config_text(link, raw_dir, options):
     if not BASE_CONFIG.exists():
         raise FileNotFoundError("下载组件未安装完整，请重新安装最新版。")
 
-    source = BASE_CONFIG.read_text(encoding="utf-8")
-    source = re.sub(
-        r"(?ms)^link:\s*\n(?:\s+-.*\n?)*",
-        f"link:\n  - {link}\n",
-        source,
-        count=1,
-    )
+    source = yaml.safe_load(BASE_CONFIG.read_text(encoding="utf-8")) or {}
     raw_dir.mkdir(parents=True, exist_ok=True)
-    output = json.dumps(str(raw_dir) + os.sep, ensure_ascii=False)
-    db_path = json.dumps(str(raw_dir / "dy_downloader.db"), ensure_ascii=False)
-
-    settings = {
-        "path": output,
-        "music": "false",
-        "cover": "false",
-        "avatar": "false",
-        "json": "false",
-        "folderstyle": "true",
-        "author_dir": '"nickname"',
-        "download_pinned": "true" if options.get("include_pinned") else "false",
-        "database": "true",
-        "database_path": db_path,
-        "start_time": json.dumps(options.get("start_date", "")),
-        "end_time": json.dumps(options.get("end_date", "")),
-        "filename_template": '"{author}-{title}-{id}"',
-        "folder_template": '"{date}_{id}"',
-    }
-    for key, value in settings.items():
-        source = replace_config_value(source, key, value)
-
-    modes = []
-    if options.get("download_videos", True) or options.get("download_images", True):
-        modes.append("post")
-    source = re.sub(r"(?ms)^mode:\s*\n(?:\s+-.*\n?)*", "mode:\n  - post\n", source, count=1)
+    source.update(
+        {
+            "link": [link],
+            "path": str(raw_dir) + os.sep,
+            "music": False,
+            "cover": False,
+            "avatar": False,
+            "json": False,
+            "folderstyle": True,
+            "author_dir": "nickname",
+            "download_pinned": bool(options.get("include_pinned")),
+            "database": True,
+            "database_path": str(raw_dir / "dy_downloader.db"),
+            "start_time": options.get("start_date", ""),
+            "end_time": options.get("end_date", ""),
+            "filename_template": "{author}-{title}-{id}",
+            "folder_template": "{date}_{id}",
+            "mode": ["post"],
+        }
+    )
     limit = max(0, int(options.get("limit") or 0))
-    source = re.sub(r"(?m)^  post:\s*\d+$", f"  post: {limit}", source)
+    number = source.get("number") if isinstance(source.get("number"), dict) else {}
+    number["post"] = limit
+    source["number"] = number
 
     media_types = []
     if options.get("download_videos", True):
         media_types.append("video")
     if options.get("download_images", True):
         media_types.append("gallery")
-    media_block = "media_types:\n" + "".join(f"  - {item}\n" for item in media_types)
-    if re.search(r"(?m)^media_types:", source):
-        source = re.sub(
-            r"(?ms)^media_types:\s*\n(?:\s+-.*\n?)*",
-            media_block,
-            source,
-            count=1,
-        )
-    else:
-        source += "\n" + media_block
-    return source
+    source["media_types"] = media_types
+    return yaml.safe_dump(source, allow_unicode=True, sort_keys=False)
 
 
 def load_database_records(db_path):
@@ -169,6 +145,37 @@ def load_database_records(db_path):
     return records
 
 
+def load_manifest_records(raw_dir):
+    manifest_path = raw_dir / "download_manifest.jsonl"
+    if not manifest_path.exists():
+        return []
+    records = []
+    for line in manifest_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        file_paths = item.get("file_paths") or []
+        source_dir = ""
+        if file_paths:
+            source_dir = str((raw_dir / file_paths[0]).resolve().parent)
+        records.append(
+            {
+                "aweme_id": str(item.get("aweme_id") or ""),
+                "media_type": item.get("media_type") or "video",
+                "title": item.get("desc") or "Untitled",
+                "author": item.get("author_name") or "Unknown author",
+                "create_time": item.get("publish_timestamp"),
+                "source_dir": source_dir,
+                "digg_count": None,
+                "comment_count": None,
+                "collect_count": None,
+                "share_count": None,
+            }
+        )
+    return records
+
+
 def unique_destination(path):
     if not path.exists():
         return path
@@ -189,6 +196,8 @@ def find_record_files(raw_dir, record):
 
 def organize_outputs(raw_dir, selected_dir, options):
     records = load_database_records(raw_dir / "dy_downloader.db")
+    if not records:
+        records = load_manifest_records(raw_dir)
     if not records:
         return {"author": "", "video_count": 0, "image_count": 0, "works": [], "output_dir": ""}
 
@@ -324,7 +333,12 @@ def run_download(job_id, link, output_dir_text, options):
         append_log(job_id, "下载完成，正在整理视频、图文和作品表格...")
         manifest = organize_outputs(raw_dir, selected_dir, options)
         if not manifest["works"]:
-            raise RuntimeError("没有读取到作品。请确认已登录、链接可访问，并检查日期或数量限制。")
+            recent_logs = safe_job(job_id).get("logs", [])[-6:]
+            detail = " | ".join(line for line in recent_logs if line)
+            raise RuntimeError(
+                "没有读取到作品。请重新登录后确认主页在登录窗口中可正常打开。"
+                + (f" 最近日志：{detail}" if detail else "")
+            )
 
         update_job(job_id, status="done", progress=100, manifest=manifest, works=manifest["works"])
         append_log(job_id, f"整理完成：{manifest['video_count']} 个视频，{manifest['image_count']} 张图文图片。")
@@ -333,7 +347,7 @@ def run_download(job_id, link, output_dir_text, options):
         update_job(job_id, status="failed", error=str(exc))
         append_log(job_id, f"失败：{exc}")
     finally:
-        if raw_dir.exists():
+        if raw_dir.exists() and safe_job(job_id).get("status") == "done":
             shutil.rmtree(raw_dir, ignore_errors=True)
 
 

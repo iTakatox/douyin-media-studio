@@ -5,6 +5,7 @@ const path = require("path");
 const http = require("http");
 
 const PORT = 5055;
+const APP_VERSION = app.getVersion();
 let mainWindow;
 let loginWindow;
 let backend;
@@ -147,6 +148,9 @@ function createWindow() {
     },
   });
   mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
+  mainWindow.webContents.on("did-finish-load", () => {
+    mainWindow.webContents.send("app-version", APP_VERSION);
+  });
 }
 
 function yamlCookieBlock(cookies) {
@@ -197,11 +201,22 @@ ipcMain.handle("open-login", async () => {
     webPreferences: { partition },
   });
   const isWebUrl = url => /^https?:\/\//i.test(url);
+  const isAllowedResource = url => /^(https?|data|blob):/i.test(url);
+  const blockExternalProtocol = (event, url) => {
+    if (!isWebUrl(url)) {
+      event.preventDefault();
+      return true;
+    }
+    return false;
+  };
   loginWindow.webContents.on("will-navigate", (event, url) => {
-    if (!isWebUrl(url)) event.preventDefault();
+    blockExternalProtocol(event, url);
   });
   loginWindow.webContents.on("will-redirect", (event, url) => {
-    if (!isWebUrl(url)) event.preventDefault();
+    blockExternalProtocol(event, url);
+  });
+  loginWindow.webContents.on("will-frame-navigate", event => {
+    blockExternalProtocol(event, event.url);
   });
   loginWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isWebUrl(url) && /(^|\.)douyin\.com$/i.test(new URL(url).hostname)) {
@@ -209,13 +224,24 @@ ipcMain.handle("open-login", async () => {
     }
     return { action: "deny" };
   });
+  session.fromPartition(partition).webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: !isAllowedResource(details.url) });
+  });
   await loginWindow.loadURL("https://www.douyin.com/");
   return true;
 });
 
 ipcMain.handle("save-login", async () => {
-  const cookies = await session.fromPartition("persist:douyin-login").cookies.get({ domain: ".douyin.com" });
+  const allCookies = await session.fromPartition("persist:douyin-login").cookies.get({});
+  const cookies = allCookies.filter(cookie => {
+    const domain = (cookie.domain || "").replace(/^\./, "").toLowerCase();
+    return domain === "douyin.com" || domain.endsWith(".douyin.com");
+  });
   if (!cookies.length) throw new Error("没有读取到登录信息，请先完成登录");
+  const names = new Set(cookies.map(cookie => cookie.name));
+  if (!names.has("ttwid")) {
+    throw new Error("Login data is incomplete (ttwid is missing). Refresh the Douyin page and try again.");
+  }
   saveCookies(cookies);
   if (loginWindow && !loginWindow.isDestroyed()) loginWindow.close();
   return cookies.length;
