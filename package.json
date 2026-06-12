@@ -1,13 +1,13 @@
 {
   "name": "douyin-media-studio",
-  "version": "2.2.1",
+  "version": "2.3.0",
   "description": "Windows desktop application for archiving authorized Douyin media",
   "main": "electron/main.js",
   "author": "iTakatox",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "build:backend": "pyinstaller --noconfirm --clean --onedir --windowed --name DouyinBackend --add-data \"templates;templates\" --add-data \"static;static\" --add-data \"scan_worker.py;.\" app.py",
+    "build:backend": "pyinstaller --noconfirm --clean --onedir --windowed --name DouyinBackend --add-data \"templates;templates\" --add-data \"static;static\" --add-data \"scan_worker.py;.\" --add-data \"comments_worker.py;.\" app.py",
     "dist": "npm run build:backend && electron-builder --win nsis"
   },
   "devDependencies": {
@@ -34,16 +34,19 @@
         "to": "setup.ps1"
       },
       {
-        "from": "app.ico",
-        "to": "app.ico"
+        "from": "app-icon-v2.ico",
+        "to": "app-icon-v2.ico"
       }
     ],
     "win": {
-      "icon": "app.ico",
+      "icon": "app-icon-v2.ico",
       "target": "nsis",
       "artifactName": "DouyinMediaStudio-Setup-${version}.${ext}"
     },
     "nsis": {
+      "installerIcon": "app-icon-v2.ico",
+      "uninstallerIcon": "app-icon-v2.ico",
+      "installerHeaderIcon": "app-icon-v2.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,

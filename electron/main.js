@@ -8,6 +8,7 @@ const crypto = require("crypto");
 
 const APP_VERSION = app.getVersion();
 const INSTANCE_TOKEN = crypto.randomBytes(24).toString("hex");
+const APP_USER_MODEL_ID = "com.itakatox.douyinmediastudio.v2";
 let backendPort;
 let mainWindow;
 let loginWindow;
@@ -121,7 +122,7 @@ function createSetupWindow() {
     height: 470,
     resizable: false,
     title: "抖音媒体工作台初始化",
-    icon: resourcePath("app.ico"),
+    icon: resourcePath("app-icon-v2.ico"),
     autoHideMenuBar: true,
   });
   const html = `<!doctype html><meta charset="utf-8"><style>
@@ -175,7 +176,7 @@ function createWindow() {
     minWidth: 1040,
     minHeight: 700,
     title: "抖音媒体工作台",
-    icon: resourcePath("app.ico"),
+    icon: resourcePath("app-icon-v2.ico"),
     autoHideMenuBar: true,
     backgroundColor: "#f3f5f7",
     webPreferences: {
@@ -234,7 +235,7 @@ ipcMain.handle("open-login", async () => {
     height: 780,
     title: "登录抖音",
     parent: mainWindow,
-    icon: resourcePath("app.ico"),
+    icon: resourcePath("app-icon-v2.ico"),
     autoHideMenuBar: true,
     webPreferences: { partition },
   });
@@ -284,6 +285,8 @@ ipcMain.handle("save-login", async () => {
   if (loginWindow && !loginWindow.isDestroyed()) loginWindow.close();
   return cookies.length;
 });
+
+app.setAppUserModelId(APP_USER_MODEL_ID);
 
 app.whenReady().then(async () => {
   try {
