@@ -163,12 +163,13 @@ function yamlCookieBlock(cookies) {
 function saveCookies(cookies) {
   const configPath = path.join(downloaderDir(), "config.yml");
   if (!fs.existsSync(configPath)) throw new Error("下载组件尚未安装");
-  const source = fs.readFileSync(configPath, "utf8");
   const block = yamlCookieBlock(cookies);
-  const updated = /^cookies:\s*\n(?:^[ \t]+.*\n?)*/m.test(source)
-    ? source.replace(/^cookies:\s*\n(?:^[ \t]+.*\n?)*/m, block)
-    : `${source.trimEnd()}\n\n${block}`;
-  fs.writeFileSync(configPath, updated, "utf8");
+  try {
+    fs.copyFileSync(configPath, `${configPath}.bak`);
+  } catch (_error) {
+    // Backup failure should not prevent repairing the configuration.
+  }
+  fs.writeFileSync(configPath, block, "utf8");
 }
 
 ipcMain.handle("choose-folder", async (_event, current) => {

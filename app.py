@@ -71,7 +71,11 @@ def build_config_text(link, raw_dir, options):
     if not BASE_CONFIG.exists():
         raise FileNotFoundError("下载组件未安装完整，请重新安装最新版。")
 
-    source = yaml.safe_load(BASE_CONFIG.read_text(encoding="utf-8")) or {}
+    config_text = BASE_CONFIG.read_text(encoding="utf-8", errors="replace")
+    try:
+        source = yaml.safe_load(config_text) or {}
+    except yaml.YAMLError:
+        source = {"cookies": extract_cookies_from_broken_yaml(config_text)}
     raw_dir.mkdir(parents=True, exist_ok=True)
     source.update(
         {
@@ -105,6 +109,30 @@ def build_config_text(link, raw_dir, options):
         media_types.append("gallery")
     source["media_types"] = media_types
     return yaml.safe_dump(source, allow_unicode=True, sort_keys=False)
+
+
+def extract_cookies_from_broken_yaml(text):
+    cookies = {}
+    in_cookies = False
+    for line in (text or "").splitlines():
+        if line.strip() == "cookies:":
+            in_cookies = True
+            continue
+        if not in_cookies:
+            continue
+        if line and not line[0].isspace():
+            break
+        match = re.match(r"^\s{2,}([A-Za-z0-9_-]+):\s*(.*?)\s*$", line)
+        if not match:
+            continue
+        key, raw_value = match.groups()
+        try:
+            value = yaml.safe_load(raw_value)
+        except yaml.YAMLError:
+            value = raw_value.strip("\"'")
+        if value not in (None, ""):
+            cookies[key] = str(value)
+    return cookies
 
 
 def load_database_records(db_path):
