@@ -64,6 +64,7 @@ async function startBackend() {
     env: {
       ...process.env,
       DOUYIN_DOWNLOADER_DIR: downloaderDir(),
+      DOUYIN_APP_DATA_DIR: runtimeDir(),
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
     },
@@ -194,6 +195,19 @@ ipcMain.handle("open-login", async () => {
     icon: resourcePath("app.ico"),
     autoHideMenuBar: true,
     webPreferences: { partition },
+  });
+  const isWebUrl = url => /^https?:\/\//i.test(url);
+  loginWindow.webContents.on("will-navigate", (event, url) => {
+    if (!isWebUrl(url)) event.preventDefault();
+  });
+  loginWindow.webContents.on("will-redirect", (event, url) => {
+    if (!isWebUrl(url)) event.preventDefault();
+  });
+  loginWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isWebUrl(url) && /(^|\.)douyin\.com$/i.test(new URL(url).hostname)) {
+      loginWindow.loadURL(url).catch(() => {});
+    }
+    return { action: "deny" };
   });
   await loginWindow.loadURL("https://www.douyin.com/");
   return true;

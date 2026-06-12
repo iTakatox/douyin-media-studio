@@ -19,6 +19,12 @@ APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 INSTALL_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else APP_DIR
 WORKSPACE = INSTALL_DIR.parent
 DOWNLOADER_DIR = Path(os.environ.get("DOUYIN_DOWNLOADER_DIR", WORKSPACE / "douyin-downloader"))
+APP_DATA_DIR = Path(
+    os.environ.get(
+        "DOUYIN_APP_DATA_DIR",
+        Path(os.environ.get("LOCALAPPDATA", Path.home())) / "DouyinMediaStudio",
+    )
+)
 BASE_CONFIG = DOWNLOADER_DIR / "config.yml"
 PYTHON_EXE = DOWNLOADER_DIR / ".venv" / "Scripts" / "python.exe"
 DEFAULT_OUTPUT = Path.home() / "Downloads" / "抖音作品"
@@ -276,7 +282,7 @@ def organize_outputs(raw_dir, selected_dir, options):
 
 
 def run_download(job_id, link, output_dir_text, options):
-    run_dir = INSTALL_DIR / "runs" / job_id
+    run_dir = APP_DATA_DIR / "runs" / job_id
     raw_dir = run_dir / "download"
     try:
         selected_dir = Path(output_dir_text).expanduser().resolve()
