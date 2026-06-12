@@ -7,107 +7,160 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="window-shell">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-mark">D</div><div><strong>抖音媒体工作台</strong><span>授权作品本地归档</span></div></div>
-      <nav>
-        <button class="nav-item active" type="button"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></svg>作品任务</button>
-      </nav>
-      <div class="account" id="account">
-        <div class="account-state"><i></i><span id="loginState">登录状态待确认</span></div>
-        <button id="loginBtn" class="secondary full" type="button">登录 / 更新账号</button>
+      <div class="traffic-lights"><i></i><i></i><i></i></div>
+      <div class="brand">
+        <img src="/static/assets/app-logo.png" alt="">
+        <div><strong>媒体归档</strong><span>授权内容工作台</span></div>
       </div>
-      <div class="legal">仅用于本人账号或已获授权内容</div>
+      <nav>
+        <button class="nav-item active" type="button" title="任务概览">
+          <svg viewBox="0 0 24 24"><path d="M4 13h6V4H4zm10 7h6V11h-6zM4 20h6v-3H4zm10-13h6V4h-6z"/></svg>
+          <span>任务概览</span>
+        </button>
+        <button class="nav-item" type="button" data-focus="works" title="作品库">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+          <span>作品库</span>
+        </button>
+        <button class="nav-item" type="button" data-focus="logs" title="运行日志">
+          <svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/></svg>
+          <span>运行日志</span>
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <button id="loginBtn" class="nav-item" type="button" title="账号登录">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+          <span id="loginState">账号登录</span>
+        </button>
+        <div class="version"><i></i><span>本地运行</span></div>
+      </div>
     </aside>
 
     <main class="workspace">
-      <header class="topbar">
-        <div><h1>作品选择与下载</h1><p>先读取主页作品，确认清单后再选择需要保存的内容。</p></div>
-        <div class="status idle" id="status"><span></span><b>等待扫描</b></div>
+      <header class="command-bar">
+        <div class="page-title">
+          <h1>抖音媒体归档助手</h1>
+          <p>读取、筛选并归档已获授权的作品</p>
+        </div>
+        <div class="command-actions">
+          <button id="newTaskBtn" class="toolbar-btn" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>新建任务
+          </button>
+          <button id="clearTaskBtn" class="toolbar-btn" type="button">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3m-9 0 1 14h10l1-14"/></svg>清空任务
+          </button>
+          <div class="status idle" id="status"><span></span><b>等待扫描</b></div>
+        </div>
       </header>
 
-      <section class="task-layout">
-        <div class="form-area">
-          <form id="downloadForm">
-            <div class="field">
-              <div class="field-head"><label for="link">抖音个人主页链接或完整分享口令</label><button id="cleanLinkBtn" class="text-btn" type="button">只保留链接</button></div>
-              <textarea id="link" rows="3" placeholder="把抖音复制的整段分享内容粘贴到这里"></textarea>
-              <small id="linkHint">支持 v.douyin.com 短链接和 douyin.com 用户主页链接</small>
+      <section class="top-grid">
+        <form id="downloadForm" class="glass-panel task-form">
+          <div class="form-title">
+            <div><h2>主页与归档设置</h2><p>文件夹规则保持为“博主名称 / mp4、图片、作品清单.csv”</p></div>
+            <button id="cleanLinkBtn" class="quiet-btn" type="button">提取链接</button>
+          </div>
+          <div class="link-row">
+            <label class="input-group wide">
+              <span>抖音个人主页链接或分享口令</span>
+              <textarea id="link" rows="2" placeholder="粘贴抖音复制的分享内容"></textarea>
+              <small id="linkHint">支持 v.douyin.com 短链接和用户主页链接</small>
+            </label>
+            <div class="settings-column">
+              <div class="setting-head">内容类型</div>
+              <div class="segmented checks">
+                <label><input id="downloadVideos" type="checkbox" checked><span>视频</span></label>
+                <label><input id="downloadImages" type="checkbox" checked><span>图文</span></label>
+                <label><input id="includePinned" type="checkbox"><span>置顶</span></label>
+              </div>
+              <label class="limit-field"><span>最多读取</span><input id="limit" type="number" min="0" value="0"><em>0 为全部</em></label>
             </div>
-            <div class="field">
-              <label for="outputDir">保存位置</label>
+          </div>
+          <div class="path-and-date">
+            <label class="input-group">
+              <span>保存位置</span>
               <div class="path-row">
                 <input id="outputDir" value="{{ default_output }}" spellcheck="false">
-                <button id="browseBtn" class="icon-btn" type="button" title="选择文件夹"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></svg></button>
+                <button id="browseBtn" class="icon-btn" type="button" title="选择文件夹"><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h11v11H3z"/></svg></button>
                 <button id="openFolderBtn" class="icon-btn" type="button" title="打开文件夹"><svg viewBox="0 0 24 24"><path d="M14 4h6v6m0-6-9 9M19 13v7H4V5h7"/></svg></button>
               </div>
-              <small>最终目录：博主名称 / mp4、图片、作品清单.csv</small>
-            </div>
-            <div class="options-grid">
-              <fieldset>
-                <legend>扫描内容</legend>
-                <label class="check-row"><input id="downloadVideos" type="checkbox" checked><span>视频作品</span></label>
-                <label class="check-row"><input id="downloadImages" type="checkbox" checked><span>图文作品</span></label>
-                <label class="check-row"><input id="includePinned" type="checkbox"><span>包含置顶作品</span></label>
-              </fieldset>
-              <fieldset>
-                <legend>作品范围</legend>
-                <label class="compact-field"><span>最多读取</span><input id="limit" type="number" min="0" value="0"><em>0 表示全部</em></label>
-                <div class="date-row">
-                  <label><span>开始日期</span><input id="startDate" type="date"></label>
-                  <label><span>结束日期</span><input id="endDate" type="date"></label>
-                </div>
-              </fieldset>
-            </div>
-            <div class="action-row">
-              <button id="scanBtn" class="primary" type="button"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>读取作品列表</button>
-              <button id="downloadBtn" class="download-action" type="submit" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>下载已选（0）</button>
-              <span id="actionHint">先读取作品，再从下方列表选择。</span>
-            </div>
-          </form>
-        </div>
-
-        <aside class="summary">
-          <h2>任务概览</h2>
-          <div class="summary-row"><span>博主</span><strong id="authorName">待识别</strong></div>
-          <div class="summary-row"><span>读取作品</span><strong id="workCount">0</strong></div>
-          <div class="summary-row"><span>已选择</span><strong id="selectedCount">0</strong></div>
-          <div class="summary-row"><span>下载完成</span><strong id="completedCount">0</strong></div>
-          <div class="progress-wrap">
-            <div class="progress-label"><span id="progressLabel">任务进度</span><b id="progressText">0%</b></div>
-            <div class="progress"><i id="progressBar"></i></div>
+            </label>
+            <label class="date-field"><span>开始日期</span><input id="startDate" type="date"></label>
+            <label class="date-field"><span>结束日期</span><input id="endDate" type="date"></label>
           </div>
-          <button id="resultFolderBtn" class="secondary full" type="button" disabled>打开结果目录</button>
+          <div class="task-actions">
+            <button id="scanBtn" class="primary" type="button"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>读取作品列表</button>
+            <button id="downloadBtn" class="download-action" type="submit" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>下载已选（0）</button>
+            <span id="actionHint">先读取主页，再选择需要归档的作品。</span>
+          </div>
+        </form>
+
+        <aside class="glass-panel progress-panel">
+          <div class="panel-heading"><h2>任务进度</h2><span id="progressText">0%</span></div>
+          <div class="progress"><i id="progressBar"></i></div>
+          <div class="progress-state"><span id="progressLabel">等待任务</span><b id="authorName">待识别</b></div>
+          <div class="metric-grid">
+            <div><span>读取作品</span><strong id="workCount">0</strong></div>
+            <div><span>已选择</span><strong id="selectedCount">0</strong></div>
+            <div><span>下载完成</span><strong id="completedCount">0</strong></div>
+            <div><span>当前可见</span><strong id="visibleCount">0</strong></div>
+          </div>
+          <button id="resultFolderBtn" class="secondary full" type="button" disabled><svg viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></svg>打开结果目录</button>
         </aside>
       </section>
 
-      <section class="results">
-        <div class="tabs">
-          <button class="tab active" type="button" data-tab="works">作品列表</button>
-          <button class="tab" type="button" data-tab="logs">运行日志</button>
+      <section class="glass-panel library">
+        <div class="library-toolbar">
+          <div class="tabs">
+            <button class="tab active" type="button" data-tab="works">作品列表</button>
+            <button class="tab" type="button" data-tab="logs">运行日志</button>
+          </div>
           <div class="list-tools" id="listTools">
-            <button id="selectAllBtn" class="tool-btn" type="button" disabled>全选</button>
-            <button id="clearAllBtn" class="tool-btn" type="button" disabled>取消全选</button>
-            <select id="typeFilter" disabled><option value="all">全部类型</option><option value="video">仅视频</option><option value="gallery">仅图文</option></select>
+            <label class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="searchInput" placeholder="搜索标题"></label>
+            <select id="sortSelect" disabled>
+              <option value="date-desc">最新发布</option>
+              <option value="date-asc">最早发布</option>
+              <option value="digg-desc">点赞最多</option>
+              <option value="comments-desc">评论最多</option>
+            </select>
+            <div class="segmented filter">
+              <button class="filter-btn active" data-filter="all" type="button" disabled>全部</button>
+              <button class="filter-btn" data-filter="video" type="button" disabled>视频</button>
+              <button class="filter-btn" data-filter="gallery" type="button" disabled>图文</button>
+            </div>
+            <button id="selectVisibleBtn" class="tool-btn" type="button" disabled>全选可见</button>
+            <button id="clearAllBtn" class="tool-btn" type="button" disabled>取消选择</button>
           </div>
           <div class="result-meta" id="resultMeta">尚未读取作品</div>
         </div>
         <div id="worksPanel" class="tab-panel active">
           <div class="table-wrap">
             <table>
-              <thead><tr><th class="select-col"><input id="headerCheck" type="checkbox" disabled></th><th>日期</th><th>标题</th><th>类型</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>状态</th></tr></thead>
-              <tbody id="worksBody"><tr class="empty-row"><td colspan="9">点击“读取作品列表”，作品信息会显示在这里</td></tr></tbody>
+              <thead><tr><th class="select-col"><input id="headerCheck" type="checkbox" disabled></th><th>发布日期</th><th>标题</th><th>类型</th><th>点赞</th><th>评论</th><th>收藏</th><th>分享</th><th>状态</th></tr></thead>
+              <tbody id="worksBody"><tr class="empty-row"><td colspan="9"><strong>暂无作品</strong><span>读取主页后，作品会显示在这里</span></td></tr></tbody>
             </table>
           </div>
+          <footer class="stats-bar">
+            <div><span>作品总数</span><strong id="statTotal">0</strong></div>
+            <div><span>视频</span><strong id="statVideos">0</strong></div>
+            <div><span>图文</span><strong id="statImages">0</strong></div>
+            <div><span>总点赞</span><strong id="statDigg">0</strong></div>
+            <div><span>总评论</span><strong id="statComments">0</strong></div>
+            <div><span>总收藏</span><strong id="statCollects">0</strong></div>
+            <div class="stats-note">文件名：日期_昵称_标题_作品号_类型</div>
+          </footer>
         </div>
-        <div id="logsPanel" class="tab-panel"><pre id="logs">等待任务...</pre></div>
+        <div id="logsPanel" class="tab-panel logs-layout">
+          <div class="log-head"><span>实时运行日志</span><button id="clearLogsBtn" class="quiet-btn" type="button">清空显示</button></div>
+          <pre id="logs">等待任务...</pre>
+        </div>
       </section>
     </main>
   </div>
 
   <dialog id="loginDialog">
-    <div class="dialog-head"><div><h2>登录抖音</h2><p>登录页会在应用内打开，不需要命令行。</p></div><button id="closeDialog" class="icon-btn" type="button">×</button></div>
-    <ol><li>点击“打开登录窗口”。</li><li>在新窗口完成扫码或账号登录。</li><li>回到这里点击“我已登录”，保存登录状态。</li></ol>
+    <div class="dialog-head"><div><h2>登录抖音</h2><p>登录页面在应用内打开，不需要命令行或其他软件。</p></div><button id="closeDialog" class="icon-btn" type="button">×</button></div>
+    <ol><li>点击“打开登录窗口”。</li><li>完成扫码或账号登录。</li><li>返回后点击“我已登录”保存状态。</li></ol>
     <div class="dialog-actions"><button id="openLoginBtn" class="secondary" type="button">打开登录窗口</button><button id="completeLoginBtn" class="primary" type="button">我已登录</button></div>
     <p id="loginMessage"></p>
   </dialog>
@@ -118,19 +171,31 @@
     let scannedWorks = [];
     let selectedIds = new Set();
     let currentResultPath = "";
+    let currentFilter = "all";
 
-    if (window.desktop?.onVersion) window.desktop.onVersion(version => document.querySelector(".legal")?.insertAdjacentHTML("beforeend", `<br>Version ${version}`));
+    if (window.desktop?.onVersion) {
+      window.desktop.onVersion(version => {
+        document.querySelector(".version span").textContent = `Version ${version}`;
+      });
+    }
 
     function extractUrl(text) {
       const match = (text || "").match(/https?:\/\/[^\s"'<>，。；、）)】]+/);
       return match ? match[0].replace(/[.,;:!?，。；：！？]+$/, "") : "";
     }
-    function escapeHtml(text) { const div = document.createElement("div"); div.textContent = text || ""; return div.innerHTML; }
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text || "";
+      return div.innerHTML;
+    }
     function formatNumber(value) {
       if (value === null || value === undefined || value === "") return "-";
       const n = Number(value);
       if (n >= 10000) return `${(n / 10000).toFixed(n >= 100000 ? 0 : 1)}万`;
       return n.toLocaleString("zh-CN");
+    }
+    function sum(field) {
+      return scannedWorks.reduce((total, item) => total + Number(item[field] || 0), 0);
     }
     function setStatus(status, message) {
       const labels = {queued:"准备中", scanning:"读取中", ready:"等待选择", running:"下载中", done:"已完成", failed:"任务失败", idle:"等待扫描"};
@@ -145,21 +210,43 @@
       if (label) $("progressLabel").textContent = label;
     }
     function visibleWorks() {
-      const filter = $("typeFilter").value;
-      return filter === "all" ? scannedWorks : scannedWorks.filter(item => item.media_type === filter);
+      const keyword = $("searchInput").value.trim().toLowerCase();
+      const sort = $("sortSelect").value;
+      const works = scannedWorks.filter(item => {
+        const typeMatches = currentFilter === "all" || item.media_type === currentFilter;
+        const textMatches = !keyword || `${item.title} ${item.aweme_id}`.toLowerCase().includes(keyword);
+        return typeMatches && textMatches;
+      });
+      const value = item => Number(item.create_time || 0);
+      works.sort((a, b) => {
+        if (sort === "date-asc") return value(a) - value(b);
+        if (sort === "digg-desc") return Number(b.digg || 0) - Number(a.digg || 0);
+        if (sort === "comments-desc") return Number(b.comments || 0) - Number(a.comments || 0);
+        return value(b) - value(a);
+      });
+      return works;
+    }
+    function updateStats() {
+      $("statTotal").textContent = scannedWorks.length;
+      $("statVideos").textContent = scannedWorks.filter(item => item.media_type === "video").length;
+      $("statImages").textContent = scannedWorks.filter(item => item.media_type === "gallery").length;
+      $("statDigg").textContent = formatNumber(sum("digg"));
+      $("statComments").textContent = formatNumber(sum("comments"));
+      $("statCollects").textContent = formatNumber(sum("collects"));
     }
     function updateSelectionUi() {
+      const visible = visibleWorks();
       $("selectedCount").textContent = selectedIds.size;
+      $("visibleCount").textContent = visible.length;
       $("downloadBtn").disabled = selectedIds.size === 0;
       $("downloadBtn").lastChild.textContent = ` 下载已选（${selectedIds.size}）`;
-      const visible = visibleWorks();
       $("headerCheck").checked = visible.length > 0 && visible.every(item => selectedIds.has(item.aweme_id));
       $("headerCheck").indeterminate = visible.some(item => selectedIds.has(item.aweme_id)) && !$("headerCheck").checked;
     }
     function renderWorks() {
       const works = visibleWorks();
       if (!works.length) {
-        $("worksBody").innerHTML = '<tr class="empty-row"><td colspan="9">当前筛选条件下没有作品</td></tr>';
+        $("worksBody").innerHTML = '<tr class="empty-row"><td colspan="9"><strong>没有匹配的作品</strong><span>调整搜索或筛选条件</span></td></tr>';
         updateSelectionUi();
         return;
       }
@@ -170,7 +257,7 @@
           <td class="title-cell" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</td>
           <td><span class="type-tag ${item.media_type}">${item.type}</span></td>
           <td>${formatNumber(item.digg)}</td><td>${formatNumber(item.comments)}</td><td>${formatNumber(item.collects)}</td><td>${formatNumber(item.shares)}</td>
-          <td><span class="state-text">${item.status || "待下载"}</span></td>
+          <td><span class="state-text ${item.status === "已下载" ? "complete" : ""}">${item.status || "待下载"}</span></td>
         </tr>`).join("");
       document.querySelectorAll(".work-check").forEach(check => check.addEventListener("change", () => {
         check.checked ? selectedIds.add(check.dataset.id) : selectedIds.delete(check.dataset.id);
@@ -179,7 +266,8 @@
       updateSelectionUi();
     }
     function setListEnabled(enabled) {
-      ["selectAllBtn","clearAllBtn","typeFilter","headerCheck"].forEach(id => $(id).disabled = !enabled);
+      ["selectVisibleBtn","clearAllBtn","sortSelect","headerCheck"].forEach(id => $(id).disabled = !enabled);
+      document.querySelectorAll(".filter-btn").forEach(button => button.disabled = !enabled);
     }
     function renderJob(job) {
       setStatus(job.status, job.status === "failed" ? job.error : "");
@@ -192,14 +280,15 @@
         scannedWorks = job.works || [];
         selectedIds = new Set(scannedWorks.map(item => item.aweme_id));
         $("workCount").textContent = scannedWorks.length;
-        $("resultMeta").textContent = `已读取 ${scannedWorks.length} 个作品，可勾选后下载`;
+        $("resultMeta").textContent = `已读取 ${scannedWorks.length} 个作品`;
         setListEnabled(true);
+        updateStats();
         renderWorks();
       }
       if (job.manifest) {
         currentResultPath = job.manifest.output_dir || "";
         $("resultFolderBtn").disabled = !currentResultPath;
-        $("resultMeta").textContent = `已保存：${job.manifest.csv_path || ""}`;
+        $("resultMeta").textContent = `已保存至 ${job.manifest.output_dir || ""}`;
         const completedIds = new Set((job.manifest.works || []).filter(item => item.status === "已下载").map(item => item.aweme_id));
         scannedWorks = scannedWorks.map(item => ({...item, status: completedIds.has(item.aweme_id) ? "已下载" : item.status}));
         renderWorks();
@@ -218,88 +307,177 @@
     }
     function options() {
       return {
-        download_videos:$("downloadVideos").checked, download_images:$("downloadImages").checked,
-        include_pinned:$("includePinned").checked, limit:Number($("limit").value || 0),
-        start_date:$("startDate").value, end_date:$("endDate").value
+        download_videos:$("downloadVideos").checked,
+        download_images:$("downloadImages").checked,
+        include_pinned:$("includePinned").checked,
+        limit:Number($("limit").value || 0),
+        start_date:$("startDate").value,
+        end_date:$("endDate").value
       };
     }
     function pollJob(jobId) {
       clearInterval(timer);
       const poll = async () => {
-        try { const response = await fetch(`/api/status/${jobId}`); renderJob(await response.json()); }
-        catch (error) { setStatus("failed", error.message); clearInterval(timer); }
+        try {
+          const response = await fetch(`/api/status/${jobId}`);
+          renderJob(await response.json());
+        } catch (error) {
+          setStatus("failed", error.message);
+          clearInterval(timer);
+        }
       };
       timer = setInterval(poll, 800);
       poll();
     }
+    function resetTask(clearInputs = false) {
+      clearInterval(timer);
+      scannedWorks = [];
+      selectedIds.clear();
+      currentResultPath = "";
+      $("workCount").textContent = "0";
+      $("selectedCount").textContent = "0";
+      $("completedCount").textContent = "0";
+      $("visibleCount").textContent = "0";
+      $("authorName").textContent = "待识别";
+      $("resultMeta").textContent = "尚未读取作品";
+      $("resultFolderBtn").disabled = true;
+      $("logs").textContent = "等待任务...";
+      $("searchInput").value = "";
+      setStatus("idle");
+      setProgress(0, "等待任务");
+      setListEnabled(false);
+      updateStats();
+      renderWorks();
+      if (clearInputs) $("link").value = "";
+    }
 
     $("cleanLinkBtn").addEventListener("click", () => {
       const url = extractUrl($("link").value);
-      if (url) { $("link").value = url; $("linkHint").textContent = `已提取：${url}`; }
-      else $("linkHint").textContent = "没有找到有效链接";
+      if (url) {
+        $("link").value = url;
+        $("linkHint").textContent = `已提取：${url}`;
+      } else {
+        $("linkHint").textContent = "没有找到有效链接";
+      }
     });
     $("browseBtn").addEventListener("click", async () => {
       try {
         const path = window.desktop ? await window.desktop.chooseFolder($("outputDir").value) : (await post("/api/select-folder", {current:$("outputDir").value})).path;
         if (path) $("outputDir").value = path;
-      } catch (error) { $("actionHint").textContent = error.message; }
+      } catch (error) {
+        $("actionHint").textContent = error.message;
+      }
     });
     async function openFolder(path) {
-      try { window.desktop ? await window.desktop.openFolder(path) : await post("/api/open-folder", {path}); }
-      catch (error) { $("actionHint").textContent = error.message; }
+      try {
+        window.desktop ? await window.desktop.openFolder(path) : await post("/api/open-folder", {path});
+      } catch (error) {
+        $("actionHint").textContent = error.message;
+      }
     }
     $("openFolderBtn").addEventListener("click", () => openFolder($("outputDir").value));
     $("resultFolderBtn").addEventListener("click", () => openFolder(currentResultPath));
+    $("newTaskBtn").addEventListener("click", () => {
+      resetTask(true);
+      $("link").focus();
+    });
+    $("clearTaskBtn").addEventListener("click", () => resetTask(false));
+    $("clearLogsBtn").addEventListener("click", () => $("logs").textContent = "日志显示已清空。");
 
     $("scanBtn").addEventListener("click", async () => {
       const link = extractUrl($("link").value);
-      if (!link) { setStatus("failed", "未找到有效链接"); $("link").focus(); return; }
-      if (!$("downloadVideos").checked && !$("downloadImages").checked) { setStatus("failed", "至少选择一种内容类型"); return; }
+      if (!link) {
+        setStatus("failed", "未找到有效链接");
+        $("link").focus();
+        return;
+      }
+      if (!$("downloadVideos").checked && !$("downloadImages").checked) {
+        setStatus("failed", "至少选择一种内容类型");
+        return;
+      }
       try {
-        $("scanBtn").disabled = true; $("downloadBtn").disabled = true; setListEnabled(false);
-        scannedWorks = []; selectedIds.clear(); renderWorks();
-        setStatus("queued"); setProgress(1, "读取进度"); $("resultMeta").textContent = `正在读取：${link}`;
+        $("scanBtn").disabled = true;
+        $("downloadBtn").disabled = true;
+        setListEnabled(false);
+        scannedWorks = [];
+        selectedIds.clear();
+        updateStats();
+        renderWorks();
+        setStatus("queued");
+        setProgress(1, "读取进度");
+        $("resultMeta").textContent = "正在读取主页作品";
         const data = await post("/api/scan", {link:$("link").value, options:options()});
         pollJob(data.job_id);
-      } catch (error) { setStatus("failed", error.message); $("scanBtn").disabled = false; }
+      } catch (error) {
+        setStatus("failed", error.message);
+        $("scanBtn").disabled = false;
+      }
     });
     $("downloadForm").addEventListener("submit", async event => {
       event.preventDefault();
       const selected = scannedWorks.filter(item => selectedIds.has(item.aweme_id));
       if (!selected.length) return;
       try {
-        $("downloadBtn").disabled = true; $("scanBtn").disabled = true;
-        setStatus("queued"); setProgress(1, "下载进度");
+        $("downloadBtn").disabled = true;
+        $("scanBtn").disabled = true;
+        setStatus("queued");
+        setProgress(1, "下载进度");
         $("resultMeta").textContent = `准备下载 ${selected.length} 个作品`;
         const data = await post("/api/start", {output_dir:$("outputDir").value, options:options(), selected_works:selected});
         pollJob(data.job_id);
-      } catch (error) { setStatus("failed", error.message); $("scanBtn").disabled = false; updateSelectionUi(); }
+      } catch (error) {
+        setStatus("failed", error.message);
+        $("scanBtn").disabled = false;
+        updateSelectionUi();
+      }
     });
-    $("selectAllBtn").addEventListener("click", () => { visibleWorks().forEach(item => selectedIds.add(item.aweme_id)); renderWorks(); });
-    $("clearAllBtn").addEventListener("click", () => { visibleWorks().forEach(item => selectedIds.delete(item.aweme_id)); renderWorks(); });
+    $("selectVisibleBtn").addEventListener("click", () => {
+      visibleWorks().forEach(item => selectedIds.add(item.aweme_id));
+      renderWorks();
+    });
+    $("clearAllBtn").addEventListener("click", () => {
+      selectedIds.clear();
+      renderWorks();
+    });
     $("headerCheck").addEventListener("change", () => {
       visibleWorks().forEach(item => $("headerCheck").checked ? selectedIds.add(item.aweme_id) : selectedIds.delete(item.aweme_id));
       renderWorks();
     });
-    $("typeFilter").addEventListener("change", renderWorks);
+    $("searchInput").addEventListener("input", renderWorks);
+    $("sortSelect").addEventListener("change", renderWorks);
+    document.querySelectorAll(".filter-btn").forEach(button => button.addEventListener("click", () => {
+      currentFilter = button.dataset.filter;
+      document.querySelectorAll(".filter-btn").forEach(item => item.classList.toggle("active", item === button));
+      renderWorks();
+    }));
     document.querySelectorAll(".tab").forEach(button => button.addEventListener("click", () => {
       document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === button));
       $("worksPanel").classList.toggle("active", button.dataset.tab === "works");
       $("logsPanel").classList.toggle("active", button.dataset.tab === "logs");
-      $("listTools").style.display = button.dataset.tab === "works" ? "flex" : "none";
+      $("listTools").classList.toggle("hidden", button.dataset.tab === "logs");
+    }));
+    document.querySelectorAll("[data-focus]").forEach(button => button.addEventListener("click", () => {
+      document.querySelector(`[data-tab="${button.dataset.focus}"]`).click();
     }));
 
     $("loginBtn").addEventListener("click", () => $("loginDialog").showModal());
     $("closeDialog").addEventListener("click", () => $("loginDialog").close());
     $("openLoginBtn").addEventListener("click", async () => {
-      try { window.desktop ? await window.desktop.openLogin() : await post("/api/login"); $("loginMessage").textContent = "登录窗口已打开，完成登录后回到这里继续。"; }
-      catch (error) { $("loginMessage").textContent = error.message; }
+      try {
+        window.desktop ? await window.desktop.openLogin() : await post("/api/login");
+        $("loginMessage").textContent = "登录窗口已打开，完成登录后回到这里继续。";
+      } catch (error) {
+        $("loginMessage").textContent = error.message;
+      }
     });
     $("completeLoginBtn").addEventListener("click", async () => {
       try {
         const message = window.desktop ? `登录信息已保存（${await window.desktop.saveLogin()} 项 Cookie）。` : (await post("/api/login/complete")).message;
-        $("loginMessage").textContent = message; $("loginState").textContent = "登录信息已保存"; $("account").classList.add("connected");
-      } catch (error) { $("loginMessage").textContent = error.message; }
+        $("loginMessage").textContent = message;
+        $("loginState").textContent = "已登录";
+      } catch (error) {
+        $("loginMessage").textContent = error.message;
+      }
     });
   </script>
 </body>
