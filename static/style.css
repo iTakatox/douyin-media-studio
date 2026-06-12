@@ -75,12 +75,15 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .date-row { margin-top: 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .date-row label span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 11px; }
 .date-row input { width: 100%; height: 32px; padding: 0 7px; font-size: 12px; }
-.action-row { display: flex; align-items: center; gap: 14px; padding-top: 18px; }
+.action-row { display: flex; align-items: center; gap: 10px; padding-top: 18px; }
 .action-row > span { margin: 0; }
 .primary, .secondary { min-height: 38px; border-radius: 6px; padding: 0 15px; font-weight: 700; }
 .primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .primary:hover { background: var(--accent-dark); }
 .primary:disabled { opacity: .55; cursor: not-allowed; }
+.download-action { min-height: 38px; border: 1px solid #12877f; border-radius: 6px; padding: 0 15px; background: #13a89e; color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; }
+.download-action:hover { background: #0f9188; }
+.download-action:disabled { opacity: .45; cursor: not-allowed; }
 .secondary { border: 1px solid var(--line); background: #fff; color: #363b42; }
 .secondary:hover { background: #f4f5f6; }
 .full { width: 100%; }
@@ -101,20 +104,28 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .tab { align-self: stretch; position: relative; padding: 0 13px; border: 0; background: transparent; color: var(--muted); font-weight: 700; }
 .tab.active { color: var(--ink); }
 .tab.active::after { content: ""; position: absolute; height: 2px; left: 13px; right: 13px; bottom: -1px; background: var(--accent); }
-.result-meta { margin-left: auto; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+.list-tools { margin-left: 14px; display: flex; align-items: center; gap: 6px; }
+.tool-btn, .list-tools select { height: 28px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: #4b5057; font-size: 11px; }
+.tool-btn { padding: 0 9px; }
+.list-tools select { padding: 0 24px 0 8px; }
+.tool-btn:disabled, .list-tools select:disabled { opacity: .45; cursor: not-allowed; }
+.result-meta { margin-left: auto; max-width: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 .table-wrap { height: 285px; overflow: auto; }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 th { position: sticky; top: 0; z-index: 1; height: 38px; padding: 0 12px; background: #f8f9fa; border-bottom: 1px solid var(--line); color: var(--muted); text-align: left; font-size: 11px; }
 td { height: 43px; padding: 0 12px; border-bottom: 1px solid #eef0f2; color: #3e434a; font-size: 12px; }
-th:nth-child(1) { width: 132px; } th:nth-child(2) { width: auto; } th:nth-child(3) { width: 70px; } th:nth-child(n+4) { width: 76px; } th:last-child { width: 90px; }
+th.select-col { width: 42px; }
+th:nth-child(2) { width: 132px; } th:nth-child(3) { width: auto; } th:nth-child(4) { width: 66px; } th:nth-child(n+5) { width: 68px; } th:last-child { width: 78px; }
+.select-col { text-align: center; padding-left: 8px; padding-right: 8px; }
 .title-cell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
 .empty-row td { height: 220px; color: #989da5; text-align: center; }
 .type-tag { display: inline-block; min-width: 38px; padding: 3px 6px; border-radius: 4px; text-align: center; font-size: 11px; }
 .type-tag.video { background: #fff0f1; color: #cc2935; }
 .type-tag.gallery { background: #e8f7f5; color: #087f77; }
 .done-dot { display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--teal); }
+.state-text { color: var(--muted); font-size: 11px; }
 pre { height: 285px; margin: 0; padding: 16px; overflow: auto; background: #17191c; color: #dce1e7; font: 12px/1.65 Consolas, monospace; white-space: pre-wrap; }
 
 dialog { width: 500px; border: 1px solid var(--line); border-radius: 8px; padding: 20px; box-shadow: 0 20px 70px rgba(0,0,0,.2); }
