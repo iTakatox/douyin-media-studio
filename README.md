@@ -5,7 +5,7 @@ Windows 桌面归档工具，用于下载本人账号或已获授权的抖音作
 ## 安装使用
 
 1. 打开 [Releases](https://github.com/iTakatox/douyin-media-studio/releases)。
-2. 下载 `DouyinMediaStudio-Setup-2.0.0.exe`。
+2. 下载最新版 `DouyinMediaStudio-Setup-*.exe`。
 3. 双击安装，安装程序会创建桌面和开始菜单图标。
 4. 打开“抖音媒体工作台”。
 5. 首次启动会自动安装下载组件，请保持网络连接。
@@ -59,5 +59,5 @@ npm run dist
 输出：
 
 ```text
-release-electron/DouyinMediaStudio-Setup-2.0.0.exe
+release-electron/DouyinMediaStudio-Setup-*.exe
 ```
