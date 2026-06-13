@@ -525,6 +525,47 @@ def export_comment_files(comment_sources, comment_dir, record, all_rows):
     return exported
 
 
+def organize_comment_only_outputs(raw_dir, selected_dir, selected_works):
+    author = safe_name((selected_works[0] if selected_works else {}).get("author"), "未知博主", 40)
+    author_dir = selected_dir / author
+    comment_dir = author_dir / "评论"
+    comment_dir.mkdir(parents=True, exist_ok=True)
+    all_rows = []
+    exported = []
+    work_map = {str(item.get("aweme_id")): item for item in selected_works}
+    for source in (raw_dir / "comments").rglob("*.json"):
+        work_id = next((key for key in work_map if key in source.name), "")
+        work = work_map.get(work_id) or {}
+        record = {
+            "aweme_id": work_id or source.stem,
+            "title": work.get("title") or "无标题",
+            "author": work.get("author") or author,
+            "create_time": work.get("create_time") or 0,
+            "media_type": work.get("media_type") or "video",
+        }
+        exported.extend(export_comment_files([source], comment_dir, record, all_rows))
+    csv_path = comment_dir / "全部评论.csv"
+    fieldnames = [
+        "作品ID", "作品标题", "层级", "评论ID", "回复评论ID", "用户昵称",
+        "用户ID", "评论内容", "发布时间", "点赞", "IP属地", "回复数",
+    ]
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(all_rows)
+    return {
+        "author": author,
+        "video_count": 0,
+        "image_count": 0,
+        "comment_count": len(all_rows),
+        "work_count": len(selected_works),
+        "works": selected_works,
+        "output_dir": str(author_dir),
+        "comment_csv_path": str(csv_path),
+        "comment_files": exported,
+    }
+
+
 def output_base_name(record):
     timestamp = int(record.get("create_time") or 0)
     date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d") if timestamp else "未知日期"
@@ -816,6 +857,50 @@ def run_generic_download(job_id, selected_works, output_dir_text, options):
             append_log(job_id, f"失败：{exc}")
 
 
+def run_comment_export(job_id, selected_works, output_dir_text, options):
+    run_dir = APP_DATA_DIR / "runs" / job_id
+    raw_dir = run_dir / "comments-only"
+    try:
+        selected_dir = Path(output_dir_text).expanduser().resolve()
+        selected_dir.mkdir(parents=True, exist_ok=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        update_job(
+            job_id,
+            status="running",
+            progress=3,
+            total=len(selected_works),
+            completed=0,
+            options=options,
+            phase="comments",
+        )
+        env = os.environ.copy()
+        env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+        append_log(job_id, f"开始提取 {len(selected_works)} 个作品的评论...")
+        if not run_comments(job_id, selected_works, run_dir, raw_dir, env):
+            update_job(job_id, status="canceled", progress=0)
+            return
+        update_job(job_id, progress=96)
+        manifest = organize_comment_only_outputs(raw_dir, selected_dir, selected_works)
+        update_job(
+            job_id,
+            status="done",
+            progress=100,
+            completed=len(selected_works),
+            manifest=manifest,
+            works=selected_works,
+        )
+        append_log(job_id, f"评论导出完成，共 {manifest['comment_count']} 条评论/回复。")
+    except Exception as exc:
+        if job_cancelled(job_id):
+            update_job(job_id, status="canceled", progress=0, error="")
+        else:
+            update_job(job_id, status="failed", error=str(exc))
+            append_log(job_id, f"评论导出失败：{exc}")
+    finally:
+        if raw_dir.exists() and safe_job(job_id).get("status") == "done":
+            shutil.rmtree(raw_dir, ignore_errors=True)
+
+
 @app.route("/")
 def index():
     return render_template("index.html", default_output=str(DEFAULT_OUTPUT))
@@ -881,6 +966,35 @@ def start():
     target = run_download if platform_id == "douyin" else run_generic_download
     threading.Thread(
         target=target,
+        args=(job_id, selected_works, output_dir, options),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id})
+
+
+@app.route("/api/export-comments", methods=["POST"])
+def export_comments():
+    data = request.get_json(force=True)
+    output_dir = (data.get("output_dir") or str(DEFAULT_OUTPUT)).strip()
+    options = data.get("options") or {}
+    selected_works = data.get("selected_works") or []
+    if not selected_works:
+        return jsonify({"error": "请至少选择一个作品。"}), 400
+    if any((item.get("platform") or "douyin") != "douyin" for item in selected_works):
+        return jsonify({"error": "当前仅抖音支持独立评论导出。"}), 400
+    job_id = uuid.uuid4().hex[:12]
+    update_job(
+        job_id,
+        kind="comments",
+        status="queued",
+        progress=1,
+        logs=[],
+        works=[],
+        platform="douyin",
+        platform_label="抖音",
+    )
+    threading.Thread(
+        target=run_comment_export,
         args=(job_id, selected_works, output_dir, options),
         daemon=True,
     ).start()
