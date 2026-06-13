@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ COMMENTS_WORKER = APP_DIR / "comments_worker.py"
 GENERIC_WORKER = APP_DIR / "generic_worker.py"
 DEFAULT_OUTPUT = Path.home() / "Downloads" / "媒体归档"
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+SCAN_TIMEOUT_SECONDS = 240
 
 app = Flask(__name__, template_folder=str(APP_DIR / "templates"), static_folder=str(APP_DIR / "static"))
 jobs = {}
@@ -60,7 +62,9 @@ def safe_job(job_id):
 
 def update_job(job_id, **updates):
     with jobs_lock:
-        jobs.setdefault(job_id, {}).update(updates)
+        job = jobs.setdefault(job_id, {})
+        job.update(updates)
+        job["updated_at"] = time.time()
 
 
 def append_log(job_id, line):
@@ -69,8 +73,13 @@ def append_log(job_id, line):
         return
     with jobs_lock:
         job = jobs.setdefault(job_id, {})
-        job.setdefault("logs", []).append(text)
-        job["logs"] = job["logs"][-500:]
+        logs = job.setdefault("logs", [])
+        logs.append(text)
+        if len(logs) > 500:
+            removed = len(logs) - 500
+            del logs[:removed]
+            job["log_start"] = int(job.get("log_start") or 0) + removed
+        job["updated_at"] = time.time()
 
 
 def job_cancelled(job_id):
@@ -87,6 +96,21 @@ def stop_process_tree(pid):
         creationflags=CREATE_NO_WINDOW,
         check=False,
     )
+
+
+def process_timeout_guard(job_id, process, seconds=SCAN_TIMEOUT_SECONDS):
+    timed_out = threading.Event()
+
+    def terminate():
+        if process.poll() is None:
+            timed_out.set()
+            append_log(job_id, f"读取超过 {seconds // 60} 分钟无结果，已自动停止。")
+            stop_process_tree(process.pid)
+
+    timer = threading.Timer(seconds, terminate)
+    timer.daemon = True
+    timer.start()
+    return timer, timed_out
 
 
 def read_base_config():
@@ -216,6 +240,7 @@ def run_scan(job_id, link, options):
             creationflags=CREATE_NO_WINDOW,
         )
         update_job(job_id, pid=process.pid)
+        timeout_timer, timed_out = process_timeout_guard(job_id, process)
         result = None
         assert process.stdout is not None
         for line in process.stdout:
@@ -239,11 +264,14 @@ def run_scan(job_id, link, options):
                 append_log(job_id, event.get("message", "扫描失败"))
 
         return_code = process.wait()
+        timeout_timer.cancel()
         if job_cancelled(job_id):
             update_job(job_id, status="canceled", progress=0, error="")
             append_log(job_id, "任务已停止。")
             return
         if return_code != 0 or not result:
+            if timed_out.is_set():
+                raise RuntimeError("平台响应超时，任务已停止。请缩小读取数量或稍后重试。")
             raise RuntimeError("没有读取到作品。请确认已登录、链接可访问，并重试。")
         works = result.get("works") or []
         update_job(
@@ -298,6 +326,7 @@ def run_generic_scan(job_id, link, options, platform_id):
             creationflags=CREATE_NO_WINDOW,
         )
         update_job(job_id, pid=process.pid)
+        timeout_timer, timed_out = process_timeout_guard(job_id, process)
         result = None
         worker_error = ""
         assert process.stdout is not None
@@ -319,11 +348,14 @@ def run_generic_scan(job_id, link, options, platform_id):
             if event.get("message"):
                 append_log(job_id, event["message"])
         return_code = process.wait()
+        timeout_timer.cancel()
         if job_cancelled(job_id):
             update_job(job_id, status="canceled", progress=0, error="")
             append_log(job_id, "任务已停止。")
             return
         if return_code != 0 or not result:
+            if timed_out.is_set():
+                raise RuntimeError("平台响应超时，任务已停止。请换用单条作品链接或稍后重试。")
             raise RuntimeError(
                 worker_error
                 or f"{details['label']} 没有返回公开作品。可能需要登录，或当前链接类型暂不支持。"
@@ -1004,7 +1036,23 @@ def export_comments():
 @app.route("/api/status/<job_id>")
 def status(job_id):
     job = safe_job(job_id)
-    return jsonify(job) if job else (jsonify({"error": "任务不存在。"}), 404)
+    if not job:
+        return jsonify({"error": "任务不存在。"}), 404
+    logs = job.pop("logs", [])
+    log_start = int(job.pop("log_start", 0) or 0)
+    try:
+        offset = max(0, int(request.args.get("log_offset", "0")))
+    except ValueError:
+        offset = 0
+    latest_offset = log_start + len(logs)
+    if offset < log_start or offset > latest_offset:
+        offset = log_start
+    job["logs_delta"] = logs[offset - log_start:]
+    job["log_offset"] = latest_offset
+    if job.get("status") not in {"ready", "done"}:
+        job.pop("works", None)
+        job.pop("manifest", None)
+    return jsonify(job)
 
 
 @app.route("/api/stop/<job_id>", methods=["POST"])
