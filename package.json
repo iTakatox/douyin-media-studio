@@ -1,6 +1,6 @@
 {
   "name": "douyin-media-studio",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Windows desktop application for archiving authorized public social media",
   "main": "electron/main.js",
   "author": "iTakatox",

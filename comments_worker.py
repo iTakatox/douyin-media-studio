@@ -14,17 +14,37 @@ def emit(event, **payload):
     print(json.dumps({"event": event, **payload}, ensure_ascii=False), flush=True)
 
 
+async def fetch_reply_page(client, aweme_id, comment_id, cursor, page_size):
+    # Reply endpoints trigger anti-bot more often. Use the client's quiet request
+    # path so a blocked reply page degrades to an empty result instead of a fatal log.
+    if all(hasattr(client, name) for name in ("_default_query", "_request_json", "_normalize_paged_response")):
+        params = await client._default_query()
+        params.update({
+            "item_id": aweme_id,
+            "comment_id": comment_id,
+            "cursor": cursor,
+            "count": page_size,
+        })
+        raw = await client._request_json(
+            "/aweme/v1/web/comment/list/reply/",
+            params,
+            suppress_error=True,
+        )
+        return client._normalize_paged_response(raw, item_keys=["comments"])
+    return await client.get_aweme_comment_replies(
+        aweme_id=aweme_id,
+        comment_id=comment_id,
+        cursor=cursor,
+        count=page_size,
+    )
+
+
 async def fetch_all_replies(client, aweme_id, comment_id, page_size):
     replies = []
     seen = set()
     cursor = 0
     while True:
-        page = await client.get_aweme_comment_replies(
-            aweme_id=aweme_id,
-            comment_id=comment_id,
-            cursor=cursor,
-            count=page_size,
-        )
+        page = await fetch_reply_page(client, aweme_id, comment_id, cursor, page_size)
         items = page.get("items") or []
         for reply in items:
             reply_id = str(reply.get("cid") or reply.get("comment_id") or "")
@@ -63,6 +83,8 @@ async def fetch_all_comments(client, aweme_id, include_replies, max_comments, pa
                 comment["_replies"] = await fetch_all_replies(
                     client, aweme_id, comment_id, page_size
                 )
+                if not comment["_replies"]:
+                    comment["_reply_limited"] = True
             comments.append(comment)
             if max_comments and len(comments) >= max_comments:
                 return comments[:max_comments]
@@ -115,12 +137,17 @@ async def collect(args):
             target = output_dir / f"{aweme_id}_comments.json"
             target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             reply_count = sum(len(item.get("_replies") or []) for item in comments)
+            limited_count = sum(1 for item in comments if item.get("_reply_limited"))
             emit(
                 "item",
                 aweme_id=aweme_id,
                 comments=len(comments),
                 replies=reply_count,
-                message=f"[{index}/{total}] 已提取 {len(comments)} 条评论、{reply_count} 条回复",
+                reply_limited=limited_count,
+                message=(
+                    f"[{index}/{total}] 已提取 {len(comments)} 条评论、{reply_count} 条回复"
+                    + (f"；{limited_count} 条评论的回复受平台限制" if limited_count else "")
+                ),
             )
         emit("result", progress=100)
 

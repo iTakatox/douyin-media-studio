@@ -138,7 +138,8 @@
           <div class="selection-actions">
             <span><b id="selectionLabel">0</b> 项已选择</span>
             <button id="downloadBtn" class="primary" type="submit" form="downloadForm" disabled><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14"/></svg>下载媒体</button>
-            <button id="commentExportBtn" class="secondary" type="button" disabled><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/></svg>导出评论</button>
+            <button id="commentExportBtn" class="quick-comment" type="button" disabled title="只导出一级评论，速度更快且不请求二级回复"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/></svg>快速评论</button>
+            <button id="fullCommentExportBtn" class="secondary" type="button" disabled title="导出一级评论并尝试获取全部二级回复"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/><path d="M8 9h8M8 12h5"/></svg>完整评论</button>
             <button id="exportListQuickBtn" class="secondary" type="button" disabled><svg viewBox="0 0 24 24"><path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4"/></svg>导出清单</button>
           </div>
           <div class="result-meta" id="resultMeta">尚未读取作品</div>
@@ -304,6 +305,7 @@
       $("visibleCount").textContent = visible.length;
       $("downloadBtn").disabled = selectedIds.size === 0;
       $("commentExportBtn").disabled = selectedIds.size === 0 || currentPlatform !== "douyin";
+      $("fullCommentExportBtn").disabled = selectedIds.size === 0 || currentPlatform !== "douyin";
       $("exportListQuickBtn").disabled = scannedWorks.length === 0;
       $("downloadBtn").lastChild.textContent = " 下载媒体";
       $("headerCheck").checked = visible.length > 0 && visible.every(item => selectedIds.has(item.aweme_id));
@@ -554,18 +556,25 @@
         updateSelectionUi();
       }
     });
-    $("commentExportBtn").addEventListener("click", async () => {
+    async function exportSelectedComments(includeReplies) {
       const selected = scannedWorks.filter(item => selectedIds.has(item.aweme_id));
       if (!selected.length || currentPlatform !== "douyin") return;
       try {
         $("commentExportBtn").disabled = true;
+        $("fullCommentExportBtn").disabled = true;
         $("scanBtn").disabled = true;
         setStatus("queued");
         setProgress(1, "评论进度");
-        $("resultMeta").textContent = `准备导出 ${selected.length} 个作品的评论`;
+        $("resultMeta").textContent = includeReplies
+          ? `准备完整导出 ${selected.length} 个作品的评论和回复`
+          : `准备快速导出 ${selected.length} 个作品的一级评论`;
         const data = await post("/api/export-comments", {
           output_dir:$("outputDir").value,
-          options:{...options(), download_comments:true},
+          options:{
+            ...options(),
+            download_comments:true,
+            include_comment_replies:includeReplies
+          },
           selected_works:selected
         });
         pollJob(data.job_id);
@@ -574,7 +583,9 @@
         $("scanBtn").disabled = false;
         updateSelectionUi();
       }
-    });
+    }
+    $("commentExportBtn").addEventListener("click", () => exportSelectedComments(false));
+    $("fullCommentExportBtn").addEventListener("click", () => exportSelectedComments(true));
     $("moreToolsBtn").addEventListener("click", () => $("bulkMenu").classList.toggle("hidden"));
     $("selectVisibleBtn").addEventListener("click", () => {
       visibleWorks().forEach(item => selectedIds.add(item.aweme_id));

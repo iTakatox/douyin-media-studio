@@ -921,7 +921,8 @@ def run_comment_export(job_id, selected_works, output_dir_text, options):
             manifest=manifest,
             works=selected_works,
         )
-        append_log(job_id, f"评论导出完成，共 {manifest['comment_count']} 条评论/回复。")
+        mode_label = "评论及回复" if options.get("include_comment_replies") else "一级评论"
+        append_log(job_id, f"{mode_label}导出完成，共 {manifest['comment_count']} 条记录。")
     except Exception as exc:
         if job_cancelled(job_id):
             update_job(job_id, status="canceled", progress=0, error="")
