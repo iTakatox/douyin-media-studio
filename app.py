@@ -417,6 +417,7 @@ def run_comments(job_id, selected_works, run_dir, raw_dir, env):
         creationflags=CREATE_NO_WINDOW,
     )
     update_job(job_id, pid=process.pid, phase="comments")
+    result = {}
     assert process.stdout is not None
     for line in process.stdout:
         text = line.strip()
@@ -430,6 +431,8 @@ def run_comments(job_id, selected_works, run_dir, raw_dir, env):
         if event.get("event") == "progress":
             progress = 72 + int(float(event.get("progress") or 0) * 0.22)
             update_job(job_id, progress=min(94, progress))
+        elif event.get("event") == "result":
+            result = event
         if event.get("message"):
             append_log(job_id, event["message"])
     return_code = process.wait()
@@ -437,7 +440,7 @@ def run_comments(job_id, selected_works, run_dir, raw_dir, env):
         return False
     if return_code != 0:
         raise RuntimeError("评论提取失败，请查看运行日志。")
-    return True
+    return result or {"completed": len(selected_works), "failed": 0, "pending_works": []}
 
 
 def load_database_records(db_path):
@@ -576,7 +579,7 @@ def organize_comment_only_outputs(raw_dir, selected_dir, selected_works):
             "media_type": work.get("media_type") or "video",
         }
         exported.extend(export_comment_files([source], comment_dir, record, all_rows))
-    csv_path = comment_dir / "全部评论.csv"
+    csv_path = unique_destination(comment_dir / "全部评论.csv")
     fieldnames = [
         "作品ID", "作品标题", "层级", "评论ID", "回复评论ID", "用户昵称",
         "用户ID", "评论内容", "发布时间", "点赞", "IP属地", "回复数",
@@ -672,7 +675,7 @@ def organize_outputs(raw_dir, selected_dir, options):
         )
     comment_csv_path = ""
     if options.get("download_comments"):
-        comment_csv = comment_dir / "全部评论.csv"
+        comment_csv = unique_destination(comment_dir / "全部评论.csv")
         fieldnames = [
             "作品ID", "作品标题", "层级", "评论ID", "回复评论ID", "用户昵称",
             "用户ID", "评论内容", "发布时间", "点赞", "IP属地", "回复数",
@@ -683,7 +686,7 @@ def organize_outputs(raw_dir, selected_dir, options):
             writer.writerows(all_comment_rows)
         comment_csv_path = str(comment_csv)
     comment_count = len(all_comment_rows)
-    csv_path = author_dir / "作品清单.csv"
+    csv_path = unique_destination(author_dir / "作品清单.csv")
     with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["发布日期", "标题", "类型", "点赞", "评论", "收藏", "分享", "作品ID", "本地文件"])
@@ -908,11 +911,23 @@ def run_comment_export(job_id, selected_works, output_dir_text, options):
         env = os.environ.copy()
         env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
         append_log(job_id, f"开始提取 {len(selected_works)} 个作品的评论...")
-        if not run_comments(job_id, selected_works, run_dir, raw_dir, env):
+        comment_result = run_comments(job_id, selected_works, run_dir, raw_dir, env)
+        if not comment_result:
             update_job(job_id, status="canceled", progress=0)
             return
         update_job(job_id, progress=96)
         manifest = organize_comment_only_outputs(raw_dir, selected_dir, selected_works)
+        pending_works = comment_result.get("pending_works") or []
+        manifest["pending_works"] = pending_works
+        manifest["pending_count"] = len(pending_works)
+        pending_source = raw_dir / "comments" / "未完成作品.csv"
+        if pending_source.exists():
+            pending_target = unique_destination(
+                Path(manifest["output_dir"]) / "评论" / "未完成作品.csv"
+            )
+            pending_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(pending_source), str(pending_target))
+            manifest["pending_csv_path"] = str(pending_target)
         update_job(
             job_id,
             status="done",
@@ -922,7 +937,11 @@ def run_comment_export(job_id, selected_works, output_dir_text, options):
             works=selected_works,
         )
         mode_label = "评论及回复" if options.get("include_comment_replies") else "一级评论"
-        append_log(job_id, f"{mode_label}导出完成，共 {manifest['comment_count']} 条记录。")
+        append_log(
+            job_id,
+            f"{mode_label}导出结束，共 {manifest['comment_count']} 条记录"
+            + (f"，{manifest['pending_count']} 个作品待重试。" if manifest["pending_count"] else "。"),
+        )
     except Exception as exc:
         if job_cancelled(job_id):
             update_job(job_id, status="canceled", progress=0, error="")

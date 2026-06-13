@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import csv
 import json
 import sys
 from pathlib import Path
@@ -61,17 +62,44 @@ async def fetch_all_replies(client, aweme_id, comment_id, page_size):
     return replies
 
 
+async def fetch_comment_page(client, aweme_id, cursor, page_size):
+    if all(hasattr(client, name) for name in ("_default_query", "_request_json", "_normalize_paged_response")):
+        params = await client._default_query()
+        params.update({
+            "aweme_id": aweme_id,
+            "cursor": cursor,
+            "count": page_size,
+            "item_type": "0",
+            "insert_ids": "",
+            "whale_cut_token": "",
+            "cut_version": "1",
+            "rcFT": "",
+        })
+        raw = await client._request_json(
+            "/aweme/v1/web/comment/list/",
+            params,
+            suppress_error=True,
+        )
+        if not raw:
+            return {"items": [], "has_more": False, "max_cursor": cursor}, True
+        return client._normalize_paged_response(raw, item_keys=["comments"]), False
+    page = await client.get_aweme_comments(
+        aweme_id,
+        cursor=cursor,
+        count=page_size,
+        include_replies=False,
+    )
+    return page, False
+
+
 async def fetch_all_comments(client, aweme_id, include_replies, max_comments, page_size):
     comments = []
     seen = set()
     cursor = 0
     while True:
-        page = await client.get_aweme_comments(
-            aweme_id,
-            cursor=cursor,
-            count=page_size,
-            include_replies=False,
-        )
+        page, access_limited = await fetch_comment_page(client, aweme_id, cursor, page_size)
+        if access_limited:
+            return comments, True
         items = page.get("items") or []
         for comment in items:
             comment_id = str(comment.get("cid") or comment.get("comment_id") or "")
@@ -87,7 +115,7 @@ async def fetch_all_comments(client, aweme_id, include_replies, max_comments, pa
                     comment["_reply_limited"] = True
             comments.append(comment)
             if max_comments and len(comments) >= max_comments:
-                return comments[:max_comments]
+                return comments[:max_comments], False
         if not page.get("has_more") or not items:
             break
         next_cursor = int(page.get("max_cursor") or 0)
@@ -95,7 +123,22 @@ async def fetch_all_comments(client, aweme_id, include_replies, max_comments, pa
             break
         cursor = next_cursor
         await asyncio.sleep(0.1)
-    return comments
+    return comments, False
+
+
+def write_pending_csv(output_dir, works):
+    target = output_dir / "未完成作品.csv"
+    with target.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["作品ID", "标题", "发布日期", "原因"])
+        for work in works:
+            writer.writerow([
+                work.get("aweme_id"),
+                work.get("title"),
+                work.get("date"),
+                "一级评论接口触发风控，请稍后重试",
+            ])
+    return target
 
 
 async def collect(args):
@@ -111,6 +154,9 @@ async def collect(args):
 
     async with DouyinAPIClient(cookies, config.get("proxy")) as client:
         total = len(works)
+        completed = 0
+        failed_works = []
+        consecutive_limited = 0
         for index, work in enumerate(works, start=1):
             aweme_id = str(work.get("aweme_id") or "")
             emit(
@@ -120,13 +166,35 @@ async def collect(args):
                 progress=int((index - 1) / max(1, total) * 100),
                 message=f"[{index}/{total}] 正在提取评论：{work.get('title') or aweme_id}",
             )
-            comments = await fetch_all_comments(
+            comments, access_limited = await fetch_all_comments(
                 client,
                 aweme_id,
                 args.include_replies,
                 args.max_comments,
                 args.page_size,
             )
+            if access_limited:
+                failed_works.append(work)
+                consecutive_limited += 1
+                emit(
+                    "item",
+                    aweme_id=aweme_id,
+                    comments=0,
+                    replies=0,
+                    access_limited=True,
+                    message=f"[{index}/{total}] 一级评论访问受限，已加入待重试清单",
+                )
+                if consecutive_limited >= args.stop_after_limited:
+                    failed_works.extend(works[index:])
+                    emit(
+                        "progress",
+                        progress=int(index / max(1, total) * 100),
+                        message=f"连续 {consecutive_limited} 个作品受到风控，已自动停止并保留进度",
+                    )
+                    break
+                await asyncio.sleep(1.5)
+                continue
+            consecutive_limited = 0
             payload = {
                 "aweme_id": aweme_id,
                 "title": work.get("title") or "",
@@ -136,6 +204,7 @@ async def collect(args):
             }
             target = output_dir / f"{aweme_id}_comments.json"
             target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            completed += 1
             reply_count = sum(len(item.get("_replies") or []) for item in comments)
             limited_count = sum(1 for item in comments if item.get("_reply_limited"))
             emit(
@@ -149,7 +218,21 @@ async def collect(args):
                     + (f"；{limited_count} 条评论的回复受平台限制" if limited_count else "")
                 ),
             )
-        emit("result", progress=100)
+        pending_path = write_pending_csv(output_dir, failed_works) if failed_works else ""
+        emit(
+            "result",
+            progress=100,
+            completed=completed,
+            failed=len(failed_works),
+            pending_works=failed_works,
+            pending_path=str(pending_path) if pending_path else "",
+            stopped_early=bool(failed_works),
+            message=(
+                f"评论任务结束：完成 {completed} 个，待重试 {len(failed_works)} 个"
+                if failed_works
+                else f"评论任务完成：共处理 {completed} 个作品"
+            ),
+        )
 
 
 def main():
@@ -161,10 +244,12 @@ def main():
     parser.add_argument("--include-replies", action="store_true")
     parser.add_argument("--max-comments", type=int, default=0)
     parser.add_argument("--page-size", type=int, default=20)
+    parser.add_argument("--stop-after-limited", type=int, default=3)
     args = parser.parse_args()
     sys.path.insert(0, str(Path(args.downloader_dir).resolve()))
     args.max_comments = max(0, args.max_comments)
     args.page_size = max(1, min(20, args.page_size))
+    args.stop_after_limited = max(1, args.stop_after_limited)
     try:
         asyncio.run(collect(args))
     except Exception as exc:

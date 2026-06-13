@@ -371,7 +371,17 @@
         $("resultFolderBtn").disabled = !currentResultPath;
         $("resultMeta").textContent = job.kind === "comments"
           ? `已导出 ${job.manifest.comment_count || 0} 条评论`
+            + (job.manifest.pending_count ? `，${job.manifest.pending_count} 个作品待重试` : "")
           : `已保存至 ${job.manifest.output_dir || ""}`;
+        if (job.kind === "comments" && job.manifest.pending_works?.length) {
+          const pendingIds = new Set(job.manifest.pending_works.map(item => item.aweme_id));
+          selectedIds = pendingIds;
+          scannedWorks = scannedWorks.map(item => ({
+            ...item,
+            status: pendingIds.has(item.aweme_id) ? "待重试" : "评论已导出"
+          }));
+          $("actionHint").textContent = "风控已自动停止；当前已只选中待重试作品，稍后可再次点击“快速评论”。";
+        }
         const completedIds = new Set((job.manifest.works || []).filter(item => item.status === "已下载").map(item => item.aweme_id));
         scannedWorks = scannedWorks.map(item => ({...item, status: completedIds.has(item.aweme_id) ? "已下载" : item.status}));
         renderWorks();
