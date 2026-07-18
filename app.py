@@ -488,6 +488,107 @@ def unique_destination(path):
     raise RuntimeError(f"无法生成唯一文件名：{path.name}")
 
 
+def build_author_manifest(author, author_dir):
+    return {
+        "author": author,
+        "video_count": 0,
+        "image_count": 0,
+        "comment_count": 0,
+        "work_count": 0,
+        "works": [],
+        "output_dir": str(author_dir),
+        "csv_path": str(author_dir / "作品清单.csv"),
+        "state_path": str(author_dir / "任务状态.json"),
+        "comment_csv_path": "",
+    }
+
+
+def write_manifest_state(manifest):
+    author_dir = Path(manifest["output_dir"])
+    author_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = Path(manifest.get("csv_path") or author_dir / "作品清单.csv")
+    try:
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["发布日期", "标题", "类型", "点赞", "评论", "收藏", "分享", "作品ID", "本地文件", "状态"])
+            for item in manifest.get("works") or []:
+                writer.writerow(
+                    [
+                        item.get("date"), item.get("title"), item.get("type"), item.get("digg"),
+                        item.get("comments"), item.get("collects"), item.get("shares"),
+                        item.get("aweme_id"), " | ".join(item.get("files") or []), item.get("status"),
+                    ]
+                )
+    except PermissionError:
+        csv_path = unique_destination(csv_path)
+        manifest["csv_path"] = str(csv_path)
+        write_manifest_state(manifest)
+        return
+    state_path = Path(manifest.get("state_path") or author_dir / "任务状态.json")
+    state_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def commit_record_to_manifest(raw_dir, author_dir, record, options, manifest):
+    video_dir = author_dir / "mp4"
+    image_dir = author_dir / "图片"
+    comment_dir = author_dir / "评论"
+    video_dir.mkdir(parents=True, exist_ok=True)
+    image_dir.mkdir(parents=True, exist_ok=True)
+    if options.get("download_comments"):
+        comment_dir.mkdir(parents=True, exist_ok=True)
+    image_exts = {".jpg", ".jpeg", ".png", ".webp", ".avif"}
+    copied = []
+    base_name = output_base_name(record)
+    files = find_record_files(raw_dir, record)
+    comment_sources = [
+        path for path in files
+        if path.suffix.lower() == ".json" and path.name.lower().endswith("_comments.json")
+    ]
+    if record["media_type"] == "video":
+        for index, source in enumerate([p for p in files if p.suffix.lower() == ".mp4"], start=1):
+            suffix = "" if index == 1 else f"_{index}"
+            destination = unique_destination(video_dir / f"{base_name}{suffix}.mp4")
+            shutil.move(str(source), str(destination))
+            copied.append(str(destination))
+            manifest["video_count"] = int(manifest.get("video_count") or 0) + 1
+    else:
+        images = [path for path in files if path.suffix.lower() in image_exts]
+        for index, source in enumerate(images, start=1):
+            destination = unique_destination(image_dir / f"{base_name}_{index}{source.suffix.lower()}")
+            shutil.move(str(source), str(destination))
+            copied.append(str(destination))
+            manifest["image_count"] = int(manifest.get("image_count") or 0) + 1
+    all_comment_rows = []
+    comment_files = export_comment_files(
+        comment_sources, comment_dir, record, all_comment_rows
+    ) if options.get("download_comments") else []
+    copied.extend(comment_files)
+    manifest["comment_count"] = int(manifest.get("comment_count") or 0) + len(all_comment_rows)
+    publish_date = ""
+    if record.get("create_time"):
+        publish_date = datetime.fromtimestamp(record["create_time"]).strftime("%Y-%m-%d %H:%M")
+    row = {
+        "date": publish_date,
+        "title": record["title"],
+        "type": "视频" if record["media_type"] == "video" else "图文",
+        "digg": record.get("digg_count"),
+        "comments": record.get("comment_count"),
+        "collects": record.get("collect_count"),
+        "shares": record.get("share_count"),
+        "aweme_id": record["aweme_id"],
+        "files": copied,
+        "status": "已下载" if copied else "已跳过",
+    }
+    existing = {str(item.get("aweme_id")): index for index, item in enumerate(manifest.get("works") or [])}
+    if row["aweme_id"] in existing:
+        manifest["works"][existing[row["aweme_id"]]] = row
+    else:
+        manifest.setdefault("works", []).append(row)
+    manifest["work_count"] = len(manifest.get("works") or [])
+    write_manifest_state(manifest)
+    return row
+
+
 def find_record_files(raw_dir, record):
     source_dir = Path(record.get("source_dir") or "")
     matched = []
@@ -731,6 +832,11 @@ def run_download(job_id, selected_works, output_dir_text, options):
         )
         env = os.environ.copy()
         env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+        author = safe_name((selected_works[0] if selected_works else {}).get("author"), "未知博主", 40)
+        author_dir = selected_dir / author
+        manifest = build_author_manifest(author, author_dir)
+        committed_ids = set()
+        write_manifest_state(manifest)
         for index, work in enumerate(selected_works, start=1):
             if job_cancelled(job_id):
                 update_job(job_id, status="canceled", progress=0)
@@ -764,6 +870,14 @@ def run_download(job_id, selected_works, output_dir_text, options):
                 return
             if return_code != 0:
                 append_log(job_id, f"[{index}/{total}] 下载失败，继续处理下一项。")
+            records = load_database_records(raw_dir / "dy_downloader.db")
+            record = next((item for item in records if item["aweme_id"] == aweme_id), None)
+            if record and aweme_id not in committed_ids:
+                row = commit_record_to_manifest(raw_dir, author_dir, record, options, manifest)
+                committed_ids.add(aweme_id)
+                append_log(job_id, f"[{index}/{total}] 已实时保存：{row['status']}")
+            elif not record:
+                append_log(job_id, f"[{index}/{total}] 未找到下载记录，已保留日志供排查。")
             completed = index
             update_job(
                 job_id,
@@ -773,22 +887,38 @@ def run_download(job_id, selected_works, output_dir_text, options):
                     int(completed / total * (72 if options.get("download_comments") else 92)),
                 ),
                 current_title=work.get("title") or aweme_id,
+                manifest=manifest,
+                works=manifest["works"],
             )
         if options.get("download_comments"):
             append_log(job_id, "媒体处理完成，开始分页提取评论...")
-            if not run_comments(job_id, selected_works, run_dir, raw_dir, env):
+            comment_result = run_comments(job_id, selected_works, run_dir, raw_dir, env)
+            if not comment_result:
                 update_job(job_id, status="canceled", progress=0)
                 append_log(job_id, "任务已停止。")
                 return
-        update_job(job_id, progress=95)
-        append_log(job_id, "下载完成，正在整理文件并生成作品清单...")
-        manifest = organize_outputs(raw_dir, selected_dir, options)
+            comment_manifest = organize_comment_only_outputs(raw_dir, selected_dir, selected_works)
+            manifest["comment_count"] = comment_manifest.get("comment_count", 0)
+            manifest["comment_csv_path"] = comment_manifest.get("comment_csv_path", "")
+            manifest["comment_files"] = comment_manifest.get("comment_files", [])
+            pending_works = comment_result.get("pending_works") or []
+            manifest["pending_works"] = pending_works
+            manifest["pending_count"] = len(pending_works)
+            pending_source = raw_dir / "comments" / "未完成作品.csv"
+            if pending_source.exists():
+                pending_target = unique_destination(author_dir / "评论" / "未完成作品.csv")
+                pending_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(pending_source), str(pending_target))
+                manifest["pending_csv_path"] = str(pending_target)
+            write_manifest_state(manifest)
+        update_job(job_id, progress=98)
+        append_log(job_id, "下载完成，已保存最终清单和任务状态。")
         if not manifest["works"]:
             raise RuntimeError("所选作品没有下载成功，请查看运行日志。")
         update_job(job_id, status="done", progress=100, manifest=manifest, works=manifest["works"])
         append_log(
             job_id,
-            f"整理完成：{manifest['video_count']} 个视频，"
+            f"保存完成：{manifest['video_count']} 个视频，"
             f"{manifest['image_count']} 张图片，{manifest['comment_count']} 条评论/回复。",
         )
     except Exception as exc:
@@ -862,10 +992,14 @@ def run_generic_download(job_id, selected_works, output_dir_text, options):
             if event.get("event") == "progress":
                 update_job(job_id, progress=event.get("progress", 2))
             elif event.get("event") == "item":
+                if event.get("manifest"):
+                    manifest = event.get("manifest")
                 update_job(
                     job_id,
                     completed=event.get("completed", 0),
                     total=event.get("total", total),
+                    manifest=manifest,
+                    works=(manifest or {}).get("works", []),
                 )
             elif event.get("event") == "result":
                 manifest = event.get("manifest")

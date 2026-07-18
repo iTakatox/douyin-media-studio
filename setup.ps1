@@ -56,6 +56,12 @@ try {
         throw "Multi-platform engine installation failed with exit code $LASTEXITCODE."
     }
 
+    Write-Output "Installing optional Weibo and gallery engines..."
+    .\.venv\Scripts\python.exe -m pip install --disable-pip-version-check --upgrade gallery-dl weibo-downloader
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "Optional engines were not installed. Core media download remains available."
+    }
+
     Write-Output "Installing the login browser..."
     .\.venv\Scripts\python.exe -m playwright install chromium
     if ($LASTEXITCODE -ne 0) {

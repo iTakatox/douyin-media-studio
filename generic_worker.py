@@ -36,6 +36,16 @@ def safe_name(value, fallback="未命名", max_length=80):
     return value[:max_length].rstrip(" ._") or fallback
 
 
+def unique_destination(path):
+    if not path.exists():
+        return path
+    for index in range(2, 10000):
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"无法生成唯一文件名：{path.name}")
+
+
 def timestamp_value(info):
     return int(info.get("timestamp") or info.get("release_timestamp") or 0)
 
@@ -133,21 +143,112 @@ def download_one(ydl, work, output_root, index, total):
     item_id = safe_name(work.get("aweme_id"), "未知编号", 32)
     date = work.get("date_file") or (work.get("date") or "")[:10] or "未知日期"
     author_dir = output_root / platform_label / author
+    incoming_dir = author_dir / "_下载中"
     video_dir = author_dir / "mp4"
+    image_dir = author_dir / "图片"
+    text_dir = author_dir / "文本"
+    incoming_dir.mkdir(parents=True, exist_ok=True)
     video_dir.mkdir(parents=True, exist_ok=True)
-    filename = safe_name(f"{date}_{author}_{title}_{item_id}_视频", max_length=170)
-    before = {path.resolve() for path in video_dir.iterdir() if path.is_file()}
-    ydl.params["outtmpl"] = str(video_dir / f"{filename}.%(ext)s")
+    image_dir.mkdir(parents=True, exist_ok=True)
+    text_dir.mkdir(parents=True, exist_ok=True)
+    base_name = safe_name(f"{date}_{author}_{title}_{item_id}", max_length=160)
+    before = {path.resolve() for path in incoming_dir.iterdir() if path.is_file()}
+    ydl.params["outtmpl"] = str(incoming_dir / f"{base_name}.%(ext)s")
     emit("progress", index=index, total=total, progress=int((index - 1) / total * 95), message=f"[{index}/{total}] 正在下载：{title}")
     info = ydl.extract_info(work["source_url"], download=True)
     after = {path.resolve() for path in video_dir.iterdir() if path.is_file()}
-    files = [str(path) for path in sorted(after - before)]
+    after = {path.resolve() for path in incoming_dir.iterdir() if path.is_file()}
+    downloaded = [Path(path) for path in sorted(after - before)]
+    files = []
+    image_exts = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif"}
+    video_exts = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+    for source in downloaded:
+        suffix = source.suffix.lower()
+        if suffix in image_exts:
+            destination = unique_destination(image_dir / f"{base_name}_图片{suffix}")
+        elif suffix in video_exts:
+            destination = unique_destination(video_dir / f"{base_name}_视频{suffix}")
+        else:
+            destination = unique_destination(author_dir / source.name)
+        source.replace(destination)
+        files.append(str(destination))
+    text_path = unique_destination(text_dir / f"{base_name}_正文.txt")
+    body = work.get("title") or ""
+    if info and isinstance(info, dict):
+        body = info.get("description") or info.get("title") or body
+    text_path.write_text(
+        "\n".join([
+            f"平台：{platform_label}",
+            f"作者：{work.get('author') or author}",
+            f"发布日期：{work.get('date') or ''}",
+            f"作品ID：{work.get('aweme_id') or ''}",
+            f"原始链接：{work.get('source_url') or ''}",
+            "",
+            body,
+        ]),
+        encoding="utf-8",
+    )
+    files.append(str(text_path))
     return author_dir, {
         **work,
         "files": files,
-        "status": "已下载" if files else "已跳过",
+        "status": "已下载" if downloaded else "已保存文本",
         "downloaded_info": bool(info),
     }
+
+
+def manifest_counts(rows):
+    image_exts = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".gif"}
+    video_exts = {".mp4", ".mov", ".m4v", ".webm", ".mkv"}
+    video_count = 0
+    image_count = 0
+    for row in rows:
+        for file_name in row.get("files") or []:
+            suffix = Path(file_name).suffix.lower()
+            if suffix in video_exts:
+                video_count += 1
+            elif suffix in image_exts:
+                image_count += 1
+    return video_count, image_count
+
+
+def write_manifest(author_dir, rows):
+    csv_path = author_dir / "作品清单.csv"
+    try:
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["平台", "发布日期", "标题", "类型", "点赞", "评论", "分享", "作品ID", "原始链接", "本地文件", "状态"])
+            for item in rows:
+                writer.writerow([
+                    item.get("platform_label"), item.get("date"), item.get("title"), item.get("type"),
+                    item.get("digg"), item.get("comments"), item.get("shares"), item.get("aweme_id"),
+                    item.get("source_url"), " | ".join(item.get("files") or []), item.get("status"),
+                ])
+    except PermissionError:
+        csv_path = unique_destination(csv_path)
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["平台", "发布日期", "标题", "类型", "点赞", "评论", "分享", "作品ID", "原始链接", "本地文件", "状态"])
+            for item in rows:
+                writer.writerow([
+                    item.get("platform_label"), item.get("date"), item.get("title"), item.get("type"),
+                    item.get("digg"), item.get("comments"), item.get("shares"), item.get("aweme_id"),
+                    item.get("source_url"), " | ".join(item.get("files") or []), item.get("status"),
+                ])
+    video_count, image_count = manifest_counts(rows)
+    manifest = {
+        "author": rows[0].get("author") if rows else "",
+        "video_count": video_count,
+        "image_count": image_count,
+        "comment_count": 0,
+        "work_count": len(rows),
+        "works": rows,
+        "output_dir": str(author_dir),
+        "csv_path": str(csv_path),
+        "state_path": str(author_dir / "任务状态.json"),
+    }
+    Path(manifest["state_path"]).write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
 
 
 def download(works_path, output_path):
@@ -174,32 +275,24 @@ def download(works_path, output_path):
             author_dir, row = download_one(ydl, work, output_root, index, total)
             rows_by_dir.setdefault(author_dir, []).append(row)
             completed.append(row)
-            emit("item", completed=index, total=total, message=f"[{index}/{total}] 下载完成")
-
-    for author_dir, rows in rows_by_dir.items():
-        csv_path = author_dir / "作品清单.csv"
-        with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["平台", "发布日期", "标题", "类型", "点赞", "评论", "分享", "作品ID", "原始链接", "本地文件"])
-            for item in rows:
-                writer.writerow([
-                    item.get("platform_label"), item.get("date"), item.get("title"), item.get("type"),
-                    item.get("digg"), item.get("comments"), item.get("shares"), item.get("aweme_id"),
-                    item.get("source_url"), " | ".join(item.get("files") or []),
-                ])
+            manifest = write_manifest(author_dir, rows_by_dir[author_dir])
+            manifest["works"] = completed
+            emit("item", completed=index, total=total, row=row, manifest=manifest, message=f"[{index}/{total}] 已实时保存")
     output_dir = str(next(iter(rows_by_dir), output_root))
+    final_rows = completed
+    final_manifest = write_manifest(Path(output_dir), final_rows) if final_rows else {
+        "author": "",
+        "video_count": 0,
+        "image_count": 0,
+        "comment_count": 0,
+        "work_count": 0,
+        "works": [],
+        "output_dir": output_dir,
+    }
     emit(
         "result",
         progress=100,
-        manifest={
-            "author": completed[0].get("author") if completed else "",
-            "video_count": sum(len(item.get("files") or []) for item in completed),
-            "image_count": 0,
-            "comment_count": 0,
-            "work_count": len(completed),
-            "works": completed,
-            "output_dir": output_dir,
-        },
+        manifest=final_manifest,
     )
 
 

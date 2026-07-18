@@ -227,9 +227,11 @@
         : currentPlatform === "tiktok"
           ? "TikTok：公开主页或单条作品，匿名优先"
           : currentPlatform === "kuaishou"
-            ? "快手：公开单链接实验性解析，平台限制可能导致失败"
+            ? "快手：公开单链接实验性解析，支持视频优先保存"
           : currentPlatform === "xiaohongshu"
-            ? "小红书：公开视频笔记，匿名优先；图文原图适配中"
+            ? "小红书：公开视频/图文链接实验性解析，匿名优先"
+          : currentPlatform === "weibo"
+            ? "微博：公开正文、图片、视频优先保存；评论适配中"
           : currentPlatform === "generic"
             ? "自动识别平台；实际能力取决于公开页面"
             : `${label}：第一阶段支持公开单链接，匿名优先`;
@@ -518,14 +520,6 @@
       }
       if (!$("downloadVideos").checked && !$("downloadImages").checked) {
         setStatus("failed", "至少选择一种内容类型");
-        return;
-      }
-      const platform = detectPlatform(link)[0];
-      if (["xiaohongshu", "kuaishou"].includes(platform)) {
-        setStatus("failed", platform === "xiaohongshu"
-          ? "小红书当前接口不稳定，暂不执行以避免无效报错"
-          : "快手当前缺少稳定解析接口，暂不执行以避免无效报错");
-        $("actionHint").textContent = "该平台会在专用适配器完成后开放；微博、TikTok 等公开链接仍可尝试。";
         return;
       }
       try {
