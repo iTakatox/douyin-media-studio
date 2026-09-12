@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from resilience import CooperativePacer
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -15,9 +17,10 @@ def emit(event, **payload):
     print(json.dumps({"event": event, **payload}, ensure_ascii=False), flush=True)
 
 
-async def fetch_reply_page(client, aweme_id, comment_id, cursor, page_size):
+async def fetch_reply_page(client, aweme_id, comment_id, cursor, page_size, pacer):
     # Reply endpoints trigger anti-bot more often. Use the client's quiet request
     # path so a blocked reply page degrades to an empty result instead of a fatal log.
+    await pacer.wait()
     if all(hasattr(client, name) for name in ("_default_query", "_request_json", "_normalize_paged_response")):
         params = await client._default_query()
         params.update({
@@ -40,12 +43,12 @@ async def fetch_reply_page(client, aweme_id, comment_id, cursor, page_size):
     )
 
 
-async def fetch_all_replies(client, aweme_id, comment_id, page_size):
+async def fetch_all_replies(client, aweme_id, comment_id, page_size, pacer):
     replies = []
     seen = set()
     cursor = 0
     while True:
-        page = await fetch_reply_page(client, aweme_id, comment_id, cursor, page_size)
+        page = await fetch_reply_page(client, aweme_id, comment_id, cursor, page_size, pacer)
         items = page.get("items") or []
         for reply in items:
             reply_id = str(reply.get("cid") or reply.get("comment_id") or "")
@@ -58,11 +61,11 @@ async def fetch_all_replies(client, aweme_id, comment_id, page_size):
         if next_cursor == cursor:
             break
         cursor = next_cursor
-        await asyncio.sleep(0.08)
     return replies
 
 
-async def fetch_comment_page(client, aweme_id, cursor, page_size):
+async def fetch_comment_page(client, aweme_id, cursor, page_size, pacer):
+    await pacer.wait()
     if all(hasattr(client, name) for name in ("_default_query", "_request_json", "_normalize_paged_response")):
         params = await client._default_query()
         params.update({
@@ -92,12 +95,12 @@ async def fetch_comment_page(client, aweme_id, cursor, page_size):
     return page, False
 
 
-async def fetch_all_comments(client, aweme_id, include_replies, max_comments, page_size):
+async def fetch_all_comments(client, aweme_id, include_replies, max_comments, page_size, pacer):
     comments = []
     seen = set()
     cursor = 0
     while True:
-        page, access_limited = await fetch_comment_page(client, aweme_id, cursor, page_size)
+        page, access_limited = await fetch_comment_page(client, aweme_id, cursor, page_size, pacer)
         if access_limited:
             return comments, True
         items = page.get("items") or []
@@ -109,7 +112,7 @@ async def fetch_all_comments(client, aweme_id, include_replies, max_comments, pa
                 seen.add(comment_id)
             if include_replies and comment_id and int(comment.get("reply_comment_total") or 0) > 0:
                 comment["_replies"] = await fetch_all_replies(
-                    client, aweme_id, comment_id, page_size
+                    client, aweme_id, comment_id, page_size, pacer
                 )
                 if not comment["_replies"]:
                     comment["_reply_limited"] = True
@@ -122,7 +125,6 @@ async def fetch_all_comments(client, aweme_id, include_replies, max_comments, pa
         if next_cursor == cursor:
             break
         cursor = next_cursor
-        await asyncio.sleep(0.1)
     return comments, False
 
 
@@ -153,6 +155,9 @@ async def collect(args):
     output_dir.mkdir(parents=True, exist_ok=True)
 
     async with DouyinAPIClient(cookies, config.get("proxy")) as client:
+        # Comments are particularly sensitive to bursts.  This is intentionally
+        # a low, steady rate; the worker stops rather than evading a restriction.
+        pacer = CooperativePacer(min_interval=0.75, max_interval=3.0)
         total = len(works)
         completed = 0
         failed_works = []
@@ -172,8 +177,10 @@ async def collect(args):
                 args.include_replies,
                 args.max_comments,
                 args.page_size,
+                pacer,
             )
             if access_limited:
+                pacer.slow_down()
                 failed_works.append(work)
                 consecutive_limited += 1
                 emit(
@@ -192,8 +199,9 @@ async def collect(args):
                         message=f"连续 {consecutive_limited} 个作品受到风控，已自动停止并保留进度",
                     )
                     break
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(2.0)
                 continue
+            pacer.recover()
             consecutive_limited = 0
             payload = {
                 "aweme_id": aweme_id,

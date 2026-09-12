@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from resilience import CooperativePacer
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -80,10 +82,14 @@ async def scan(config_path, raw_url, args):
     if not cookies:
         raise RuntimeError("尚未保存登录信息，请先登录抖音。")
 
+    # Pace page calls instead of bursting a whole profile at the service.  This
+    # protects the account and is more reliable than retrying access controls.
+    pacer = CooperativePacer(min_interval=0.65, max_interval=2.0)
     async with DouyinAPIClient(cookies, config.get("proxy")) as client:
         url = raw_url
         if is_short_url(url):
             emit("progress", progress=5, message="正在解析分享短链接...")
+            await pacer.wait()
             url = await client.resolve_short_url(normalize_short_url(url))
             if not url:
                 raise RuntimeError("短链接解析失败，请确认链接仍然有效。")
@@ -94,6 +100,7 @@ async def scan(config_path, raw_url, args):
 
         sec_uid = parsed["sec_uid"]
         emit("progress", progress=10, message="正在读取博主资料...")
+        await pacer.wait()
         user = await client.get_user_info(sec_uid) or {}
         author = user.get("nickname") or "未知博主"
         expected = int(user.get("aweme_count") or 0)
@@ -105,6 +112,7 @@ async def scan(config_path, raw_url, args):
         page = 0
         while True:
             page += 1
+            await pacer.wait()
             response = await client.get_user_post(sec_uid, cursor, 20)
             items = response.get("items") or []
             if not items:

@@ -220,6 +220,7 @@
       currentPlatform = explicitPlatform || detected[0];
       const label = explicitLabel || (url ? detected[1] : "自动识别");
       const isDouyin = currentPlatform === "douyin";
+      const supportsArchiveComments = ["douyin", "xiaohongshu", "weibo"].includes(currentPlatform);
       $("platformBadge").textContent = label || "自动识别";
       $("platformBadge").className = `platform-badge ${currentPlatform}`;
       $("platformCapability").textContent = isDouyin
@@ -229,18 +230,21 @@
           : currentPlatform === "kuaishou"
             ? "快手：公开单链接实验性解析，支持视频优先保存"
           : currentPlatform === "xiaohongshu"
-            ? "小红书：公开视频/图文链接实验性解析，匿名优先"
+            ? "小红书：公开图文/视频正文归档；下载时可尝试归档解析器提供的公开评论"
           : currentPlatform === "weibo"
-            ? "微博：公开正文、图片、视频优先保存；评论适配中"
+            ? "微博：公开正文、图片、视频优先保存；下载时可尝试归档解析器提供的公开评论"
           : currentPlatform === "generic"
             ? "自动识别平台；实际能力取决于公开页面"
             : `${label}：第一阶段支持公开单链接，匿名优先`;
-      $("downloadComments").disabled = !isDouyin;
+      $("downloadComments").disabled = !supportsArchiveComments;
       $("includeCommentReplies").disabled = !isDouyin || !$("downloadComments").checked;
-      $("maxComments").disabled = !isDouyin || !$("downloadComments").checked;
+      $("maxComments").disabled = !supportsArchiveComments || !$("downloadComments").checked;
       $("includePinned").disabled = !isDouyin;
-      if (!isDouyin) {
+      if (!supportsArchiveComments) {
         $("downloadComments").checked = false;
+        $("includeCommentReplies").checked = false;
+        $("includePinned").checked = false;
+      } else if (!isDouyin) {
         $("includeCommentReplies").checked = false;
         $("includePinned").checked = false;
       }
@@ -502,12 +506,15 @@
     $("clearTaskBtn").addEventListener("click", () => resetTask(false));
     $("clearLogsBtn").addEventListener("click", () => $("logs").textContent = "日志显示已清空。");
     $("downloadComments").addEventListener("change", () => {
-      const enabled = $("downloadComments").checked && currentPlatform === "douyin";
-      $("includeCommentReplies").disabled = !enabled;
+      const enabled = $("downloadComments").checked && ["douyin", "xiaohongshu", "weibo"].includes(currentPlatform);
+      const canFetchReplies = enabled && currentPlatform === "douyin";
+      $("includeCommentReplies").disabled = !canFetchReplies;
       $("maxComments").disabled = !enabled;
-      if (!enabled) $("includeCommentReplies").checked = false;
+      if (!canFetchReplies) $("includeCommentReplies").checked = false;
       $("actionHint").textContent = enabled
-        ? "评论会保存到博主目录的“评论”文件夹；全部评论可能需要较长时间。"
+        ? currentPlatform === "douyin"
+          ? "评论会保存到博主目录的“评论”文件夹；全部评论可能需要较长时间。"
+          : "正文会保存到“文本”，评论会保存到“评论”。仅归档平台公开提供的评论；需要登录或无公开评论时会保留说明文件。"
         : "先读取主页，再选择需要归档的作品。";
     });
 

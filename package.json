@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "build:backend": "pyinstaller --noconfirm --clean --onedir --windowed --name MediaArchiveBackend --add-data \"templates;templates\" --add-data \"static;static\" --add-data \"scan_worker.py;.\" --add-data \"comments_worker.py;.\" --add-data \"generic_worker.py;.\" --add-data \"platforms.py;.\" app.py",
+    "build:backend": "pyinstaller --noconfirm --clean --onedir --windowed --name MediaArchiveBackend --add-data \"templates;templates\" --add-data \"static;static\" --add-data \"scan_worker.py;.\" --add-data \"comments_worker.py;.\" --add-data \"generic_worker.py;.\" --add-data \"platforms.py;.\" --add-data \"resilience.py;.\" app.py",
     "dist": "npm run build:backend && electron-builder --win nsis"
   },
   "devDependencies": {

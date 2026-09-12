@@ -28,6 +28,7 @@ APP_DATA_DIR = Path(
         Path(os.environ.get("LOCALAPPDATA", Path.home())) / "DouyinMediaStudio",
     )
 )
+MEDIA_CACHE_DIR = APP_DATA_DIR / "cache" / "media-engine"
 BASE_CONFIG = DOWNLOADER_DIR / "config.yml"
 PYTHON_EXE = DOWNLOADER_DIR / ".venv" / "Scripts" / "python.exe"
 SCAN_WORKER = APP_DIR / "scan_worker.py"
@@ -315,6 +316,8 @@ def run_generic_scan(job_id, link, options, platform_id):
                 link,
                 "--limit",
                 str(max(0, int(options.get("limit") or 0))),
+                "--cache-dir",
+                str(MEDIA_CACHE_DIR),
             ],
             cwd=str(APP_DIR),
             stdout=subprocess.PIPE,
@@ -966,7 +969,18 @@ def run_generic_download(job_id, selected_works, output_dir_text, options):
                 str(works_path),
                 "--output",
                 str(selected_dir),
-            ],
+                "--cache-dir",
+                str(MEDIA_CACHE_DIR),
+            ] + (
+                [
+                    "--comments",
+                    "--max-comments",
+                    str(max(0, int(options.get("max_comments") or 0))),
+                ]
+                if options.get("download_comments")
+                and selected_works[0].get("platform") in {"xiaohongshu", "weibo"}
+                else []
+            ),
             cwd=str(APP_DIR),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
