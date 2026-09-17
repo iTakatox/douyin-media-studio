@@ -8,12 +8,19 @@ const crypto = require("crypto");
 
 const APP_VERSION = app.getVersion();
 const INSTANCE_TOKEN = crypto.randomBytes(24).toString("hex");
+const PAGE_BRIDGE_TOKEN = crypto.randomBytes(24).toString("hex");
+const LOGIN_PARTITION = "persist:douyin-login";
+const REQUIRED_LOGIN_COOKIES = ["sessionid_ss", "ttwid", "passport_csrf_token"];
 const APP_USER_MODEL_ID = "com.itakatox.mediaarchivestudio";
 let backendPort;
+let pageBridgePort;
 let mainWindow;
 let loginWindow;
+let pageBridgeWindow;
 let backend;
 let setupWindow;
+let pageBridgeServer;
+let pageBridgeQueue = Promise.resolve();
 
 function resourcePath(...parts) {
   return path.join(app.isPackaged ? process.resourcesPath : path.join(__dirname, ".."), ...parts);
@@ -51,6 +58,191 @@ function reservePort() {
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : 0;
       server.close(error => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+function runtimeMarkerPath() {
+  return path.join(runtimeDir(), "runtime-version.json");
+}
+
+function runtimeIsCurrent() {
+  const markerPath = runtimeMarkerPath();
+  if (!fs.existsSync(markerPath)) return false;
+  try {
+    const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+    return marker.version === APP_VERSION;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function markRuntimeCurrent() {
+  fs.writeFileSync(runtimeMarkerPath(), JSON.stringify({version: APP_VERSION}), "utf8");
+}
+
+function createBridgeError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function chromeUserAgent() {
+  return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    + "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+}
+
+function loginSession() {
+  const loginSession = session.fromPartition(LOGIN_PARTITION);
+  loginSession.setUserAgent(chromeUserAgent());
+  return loginSession;
+}
+
+async function hasLoginSession() {
+  const currentSession = loginSession();
+  const cookieSets = await Promise.all([
+    currentSession.cookies.get({domain: ".douyin.com"}),
+    currentSession.cookies.get({domain: ".iesdouyin.com"}),
+    currentSession.cookies.get({domain: "www.douyin.com"}),
+  ]);
+  const names = new Set(cookieSets.flat().map(cookie => cookie.name));
+  return REQUIRED_LOGIN_COOKIES.every(name => names.has(name));
+}
+
+function sleep(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+async function getPageBridgeWindow() {
+  if (pageBridgeWindow && !pageBridgeWindow.isDestroyed()) return pageBridgeWindow;
+  if (!(await hasLoginSession())) {
+    throw createBridgeError("NOT_LOGGED_IN", "请先在应用内完成抖音登录，再读取作品。");
+  }
+  pageBridgeWindow = new BrowserWindow({
+    show: false,
+    width: 1280,
+    height: 900,
+    title: "抖音请求服务",
+    webPreferences: {
+      partition: LOGIN_PARTITION,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  });
+  pageBridgeWindow.on("closed", () => { pageBridgeWindow = null; });
+  pageBridgeWindow.webContents.setUserAgent(chromeUserAgent());
+  pageBridgeWindow.webContents.setWindowOpenHandler(() => ({action: "deny"}));
+  await pageBridgeWindow.loadURL("https://www.douyin.com/user/self");
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const ready = await pageBridgeWindow.webContents.executeJavaScript(
+      "typeof window.bdms === 'object' && typeof window.byted_acrawler === 'object'",
+      true,
+    );
+    if (ready) return pageBridgeWindow;
+    await sleep(500);
+  }
+  pageBridgeWindow.destroy();
+  pageBridgeWindow = null;
+  throw createBridgeError("PAGE_LOAD_FAILED", "抖音页面签名组件未能及时加载，请检查网络后重试。");
+}
+
+function buildPageBridgeRequest(requestPath, params) {
+  if (typeof requestPath !== "string" || !requestPath.startsWith("/aweme/")) {
+    throw createBridgeError("INVALID_PATH", "页面请求地址不受支持");
+  }
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && !["msToken", "a_bogus", "uifid"].includes(key)) {
+      query.set(key, String(value));
+    }
+  }
+  return `${requestPath}${query.size ? `?${query.toString()}` : ""}`;
+}
+
+async function fetchViaDouyinPage(requestPath, params, method, data) {
+  const targetPath = buildPageBridgeRequest(requestPath, params);
+  const bridgeWindow = await getPageBridgeWindow();
+  const payload = {
+    path: targetPath,
+    method: String(method || "GET").toUpperCase(),
+    body: data || null,
+  };
+  const script = `(() => {
+    const request = ${JSON.stringify(payload)};
+    const options = {
+      method: request.method,
+      credentials: "include",
+      signal: AbortSignal.timeout(25000),
+    };
+    if (request.body && request.method !== "GET") {
+      options.headers = {"Content-Type": "application/x-www-form-urlencoded"};
+      options.body = new URLSearchParams(request.body).toString();
+    }
+    return fetch(request.path, options).then(async response => ({
+      status: response.status,
+      text: (await response.text()).slice(0, 2 * 1024 * 1024),
+    }));
+  })()`;
+  try {
+    const result = await bridgeWindow.webContents.executeJavaScript(script, true);
+    return {
+      status: Number(result && result.status) || 0,
+      text: String((result && result.text) || ""),
+    };
+  } catch (error) {
+    throw createBridgeError("PAGE_FETCH_FAILED", error.message || "应用内抖音页面请求失败");
+  }
+}
+
+async function startPageBridge() {
+  if (pageBridgeServer) return;
+  pageBridgeServer = http.createServer(async (request, response) => {
+    const send = (status, body) => {
+      response.writeHead(status, {"Content-Type": "application/json; charset=utf-8"});
+      response.end(JSON.stringify(body));
+    };
+    const remoteAddress = request.socket.remoteAddress;
+    if (
+      !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remoteAddress)
+      || request.method !== "POST"
+      || request.url !== "/fetch"
+      || request.headers["x-douyin-bridge-token"] !== PAGE_BRIDGE_TOKEN
+    ) {
+      send(403, {code: "FORBIDDEN", message: "未授权的本地请求"});
+      return;
+    }
+    let raw = "";
+    request.setEncoding("utf8");
+    request.on("data", chunk => {
+      raw += chunk;
+      if (raw.length > 1024 * 1024) request.destroy();
+    });
+    request.on("end", async () => {
+      try {
+        const input = JSON.parse(raw || "{}");
+        const task = pageBridgeQueue.then(() => fetchViaDouyinPage(
+          input.path,
+          input.query,
+          input.method,
+          input.form,
+        ));
+        pageBridgeQueue = task.catch(() => {});
+        const result = await task;
+        send(200, result);
+      } catch (error) {
+        send(502, {code: error.code || "PAGE_BRIDGE_ERROR", message: error.message || "应用内请求失败"});
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    pageBridgeServer.once("error", reject);
+    pageBridgeServer.listen(0, "127.0.0.1", () => {
+      pageBridgeServer.off("error", reject);
+      const address = pageBridgeServer.address();
+      pageBridgePort = typeof address === "object" && address ? address.port : 0;
+      resolve();
     });
   });
 }
@@ -93,6 +285,7 @@ function waitForBackend(timeout = 20000) {
 
 async function startBackend() {
   fs.mkdirSync(runtimeDir(), { recursive: true });
+  await startPageBridge();
   backendPort = await reservePort();
   const spec = backendCommand();
   backend = spawn(spec.command, spec.args, {
@@ -104,6 +297,8 @@ async function startBackend() {
       DOUYIN_APP_DATA_DIR: runtimeDir(),
       DOUYIN_PORT: String(backendPort),
       DOUYIN_INSTANCE_TOKEN: INSTANCE_TOKEN,
+      DOUYIN_PAGE_BRIDGE_URL: `http://127.0.0.1:${pageBridgePort}/fetch`,
+      DOUYIN_PAGE_BRIDGE_TOKEN: PAGE_BRIDGE_TOKEN,
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
     },
@@ -144,10 +339,11 @@ function sendSetupLog(line) {
 }
 
 async function ensureRuntime() {
+  fs.mkdirSync(runtimeDir(), { recursive: true });
   const python = path.join(downloaderDir(), ".venv", "Scripts", "python.exe");
   const config = path.join(downloaderDir(), "config.yml");
   const universalEngine = path.join(downloaderDir(), ".venv", "Scripts", "yt-dlp.exe");
-  if (fs.existsSync(python) && fs.existsSync(config) && fs.existsSync(universalEngine)) return;
+  if (fs.existsSync(python) && fs.existsSync(config) && fs.existsSync(universalEngine) && runtimeIsCurrent()) return;
 
   createSetupWindow();
   await new Promise((resolve, reject) => {
@@ -167,6 +363,7 @@ async function ensureRuntime() {
     child.on("error", reject);
     child.on("exit", code => code === 0 ? resolve() : reject(new Error(`初始化失败，错误代码 ${code}`)));
   });
+  markRuntimeCurrent();
   if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close();
 }
 
@@ -230,7 +427,7 @@ ipcMain.handle("open-login", async () => {
     loginWindow.focus();
     return true;
   }
-  const partition = "persist:douyin-login";
+  const partition = LOGIN_PARTITION;
   loginWindow = new BrowserWindow({
     width: 1100,
     height: 780,
@@ -267,12 +464,14 @@ ipcMain.handle("open-login", async () => {
   session.fromPartition(partition).webRequest.onBeforeRequest((details, callback) => {
     callback({ cancel: !isAllowedResource(details.url) });
   });
+  loginSession();
+  loginWindow.webContents.setUserAgent(chromeUserAgent());
   await loginWindow.loadURL("https://www.douyin.com/");
   return true;
 });
 
 ipcMain.handle("save-login", async () => {
-  const allCookies = await session.fromPartition("persist:douyin-login").cookies.get({});
+  const allCookies = await loginSession().cookies.get({});
   const cookies = allCookies.filter(cookie => {
     const domain = (cookie.domain || "").replace(/^\./, "").toLowerCase();
     return domain === "douyin.com" || domain.endsWith(".douyin.com");
@@ -295,6 +494,7 @@ app.whenReady().then(async () => {
     await startBackend();
     createWindow();
   } catch (error) {
+    console.error("多平台媒体归档启动失败:", error);
     dialog.showErrorBox("启动失败", error.message);
     app.quit();
   }
@@ -303,4 +503,6 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   if (backend && !backend.killed) backend.kill();
+  if (pageBridgeServer) pageBridgeServer.close();
+  if (pageBridgeWindow && !pageBridgeWindow.isDestroyed()) pageBridgeWindow.destroy();
 });

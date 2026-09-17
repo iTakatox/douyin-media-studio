@@ -1,7 +1,10 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +18,102 @@ if hasattr(sys.stdout, "reconfigure"):
 
 def emit(event, **payload):
     print(json.dumps({"event": event, **payload}, ensure_ascii=False), flush=True)
+
+
+class PageBridgeError(RuntimeError):
+    def __init__(self, code, message):
+        self.page_bridge_code = code
+        super().__init__(message)
+
+
+class PageBridgeResult:
+    def __init__(self, status, text):
+        self.http_status = int(status or 0)
+        self.text = str(text or "")
+        try:
+            self.body = json.loads(self.text) if self.text else None
+        except json.JSONDecodeError:
+            self.body = None
+
+
+class LocalPageBridge:
+    """Use the desktop app's logged-in hidden Douyin page for gated API calls."""
+
+    def __init__(self):
+        self.url = os.environ.get("DOUYIN_PAGE_BRIDGE_URL", "").strip()
+        self.token = os.environ.get("DOUYIN_PAGE_BRIDGE_TOKEN", "").strip()
+
+    @property
+    def available(self):
+        return bool(self.url and self.token)
+
+    async def fetch(self, path, params, *, method="GET", data=None):
+        if not self.available:
+            raise PageBridgeError("UNAVAILABLE", "应用内抖音请求通道不可用")
+        payload = json.dumps(
+            {"path": path, "query": params or {}, "method": method, "form": data},
+            ensure_ascii=False,
+        ).encode("utf-8")
+
+        def request_bridge():
+            request = urllib.request.Request(
+                self.url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json; charset=utf-8",
+                    "X-Douyin-Bridge-Token": self.token,
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=45) as response:
+                    return response.status, response.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as exc:
+                return exc.code, exc.read().decode("utf-8", "replace")
+
+        status, text = await asyncio.to_thread(request_bridge)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise PageBridgeError("INVALID_RESPONSE", "应用内抖音请求返回了无效数据") from exc
+        if status != 200:
+            raise PageBridgeError(data.get("code", "PAGE_BRIDGE_ERROR"), data.get("message", "应用内请求失败"))
+        return PageBridgeResult(data.get("status"), data.get("text"))
+
+
+def use_page_bridge(client, bridge):
+    """Route gated Douyin API calls through the signed in-app browser page."""
+
+    async def request_json(path, params, *, suppress_error=False, max_retries=3):
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                result = await bridge.fetch(path, params)
+                if result.http_status == 200 and isinstance(result.body, dict):
+                    return result.body
+                if result.http_status == 200:
+                    last_error = PageBridgeError(
+                        "INVALID_RESPONSE",
+                        "抖音页面返回了无效数据，请重新登录后重试。",
+                    )
+                else:
+                    last_error = PageBridgeError(
+                        "HTTP_ERROR",
+                        f"抖音页面请求失败（HTTP {result.http_status}）。",
+                    )
+            except PageBridgeError as exc:
+                last_error = exc
+                if exc.page_bridge_code in {"NOT_LOGGED_IN", "PAGE_LOAD_FAILED"}:
+                    raise
+
+            if attempt < max_retries - 1:
+                await asyncio.sleep(attempt + 1)
+
+        if last_error:
+            raise last_error
+        return {}
+
+    client._request_json = request_json
 
 
 def media_type(item):
@@ -82,10 +181,16 @@ async def scan(config_path, raw_url, args):
     if not cookies:
         raise RuntimeError("尚未保存登录信息，请先登录抖音。")
 
-    # Pace page calls instead of bursting a whole profile at the service.  This
-    # protects the account and is more reliable than retrying access controls.
+    # Pace page calls instead of bursting a whole profile at the service. This
+    # keeps an authorised archive job stable after the in-page request is signed.
     pacer = CooperativePacer(min_interval=0.65, max_interval=2.0)
-    async with DouyinAPIClient(cookies, config.get("proxy")) as client:
+    bridge = LocalPageBridge()
+    client = DouyinAPIClient(cookies, config.get("proxy"))
+    if bridge.available:
+        use_page_bridge(client, bridge)
+        emit("progress", progress=2, message="已启用应用内登录通道...")
+
+    async with client:
         url = raw_url
         if is_short_url(url):
             emit("progress", progress=5, message="正在解析分享短链接...")
@@ -140,6 +245,12 @@ async def scan(config_path, raw_url, args):
             if next_cursor == cursor:
                 break
             cursor = next_cursor
+
+        if not works and expected:
+            raise RuntimeError(
+                "抖音没有返回作品列表。请在应用内重新登录后重试；"
+                "若出现安全验证，请在登录窗口完成验证。"
+            )
 
         works.sort(key=lambda item: item.get("create_time") or 0, reverse=True)
         emit(

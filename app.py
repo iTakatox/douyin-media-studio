@@ -243,6 +243,7 @@ def run_scan(job_id, link, options):
         update_job(job_id, pid=process.pid)
         timeout_timer, timed_out = process_timeout_guard(job_id, process)
         result = None
+        worker_error = ""
         assert process.stdout is not None
         for line in process.stdout:
             text = line.strip()
@@ -262,7 +263,8 @@ def run_scan(job_id, link, options):
             elif event_type == "result":
                 result = event
             elif event_type == "error":
-                append_log(job_id, event.get("message", "扫描失败"))
+                worker_error = event.get("message") or ""
+                append_log(job_id, worker_error or "扫描失败")
 
         return_code = process.wait()
         timeout_timer.cancel()
@@ -273,7 +275,10 @@ def run_scan(job_id, link, options):
         if return_code != 0 or not result:
             if timed_out.is_set():
                 raise RuntimeError("平台响应超时，任务已停止。请缩小读取数量或稍后重试。")
-            raise RuntimeError("没有读取到作品。请确认已登录、链接可访问，并重试。")
+            raise RuntimeError(
+                worker_error
+                or "没有读取到作品。请确认已登录、链接可访问，并重试。"
+            )
         works = result.get("works") or []
         update_job(
             job_id,

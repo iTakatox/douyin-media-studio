@@ -29,6 +29,14 @@ if (-not (Test-Path -LiteralPath $DownloaderDir)) {
     }
 }
 
+if (Test-Path -LiteralPath (Join-Path $DownloaderDir ".git")) {
+    Write-Output "Updating the Douyin download component..."
+    git -C $DownloaderDir pull --ff-only
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "Component update was skipped. Existing component will be used."
+    }
+}
+
 Push-Location $DownloaderDir
 try {
     if (-not (Test-Path -LiteralPath ".\.venv\Scripts\python.exe")) {
