@@ -81,10 +81,25 @@ class LocalPageBridge:
         return PageBridgeResult(data.get("status"), data.get("text"))
 
 
+PAGE_BRIDGE_PATHS = {
+    "/aweme/v1/web/aweme/post/",
+    "/aweme/v1/web/aweme/detail/",
+}
+
+
 def use_page_bridge(client, bridge):
-    """Route gated Douyin API calls through the signed in-app browser page."""
+    """Route only gated Douyin API calls through the signed browser page."""
+
+    direct_request_json = client._request_json
 
     async def request_json(path, params, *, suppress_error=False, max_retries=3):
+        if path not in PAGE_BRIDGE_PATHS:
+            return await direct_request_json(
+                path,
+                params,
+                suppress_error=suppress_error,
+                max_retries=max_retries,
+            )
         last_error = None
         for attempt in range(max_retries):
             try:
