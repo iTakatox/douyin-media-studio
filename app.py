@@ -840,6 +840,11 @@ def run_download(job_id, selected_works, output_dir_text, options):
         )
         env = os.environ.copy()
         env.update({"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
+        if env.get("DOUYIN_PAGE_BRIDGE_URL") and env.get("DOUYIN_PAGE_BRIDGE_TOKEN"):
+            existing_pythonpath = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = os.pathsep.join(
+                part for part in (str(APP_DIR), existing_pythonpath) if part
+            )
         author = safe_name((selected_works[0] if selected_works else {}).get("author"), "未知博主", 40)
         author_dir = selected_dir / author
         manifest = build_author_manifest(author, author_dir)
