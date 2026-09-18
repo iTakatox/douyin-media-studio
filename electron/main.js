@@ -390,10 +390,11 @@ function createWindow() {
 }
 
 function yamlCookieBlock(cookies) {
-  return "cookies:\n" + cookies
+  const validCookies = cookies
+    .filter(cookie => typeof cookie.name === "string" && /^[A-Za-z0-9_-]+$/.test(cookie.name))
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map(cookie => `  ${cookie.name}: ${JSON.stringify(cookie.value)}`)
-    .join("\n") + "\n";
+    .map(cookie => `  ${JSON.stringify(cookie.name)}: ${JSON.stringify(String(cookie.value || ""))}`);
+  return "cookies:\n" + validCookies.join("\n") + "\n";
 }
 
 function saveCookies(cookies) {
@@ -474,7 +475,9 @@ ipcMain.handle("save-login", async () => {
   const allCookies = await loginSession().cookies.get({});
   const cookies = allCookies.filter(cookie => {
     const domain = (cookie.domain || "").replace(/^\./, "").toLowerCase();
-    return domain === "douyin.com" || domain.endsWith(".douyin.com");
+    return (domain === "douyin.com" || domain.endsWith(".douyin.com"))
+      && typeof cookie.name === "string"
+      && /^[A-Za-z0-9_-]+$/.test(cookie.name);
   });
   if (!cookies.length) throw new Error("没有读取到登录信息，请先完成登录");
   const names = new Set(cookies.map(cookie => cookie.name));
