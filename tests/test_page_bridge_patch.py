@@ -61,13 +61,15 @@ class PageBridgePatchTests(unittest.TestCase):
         else:
             sys.modules["core.api_client"] = self.old_api
 
-    def test_only_gated_detail_requests_use_the_page_bridge(self):
+    def test_injects_the_official_page_bridge_dependency(self):
         core = types.ModuleType("core")
         api_client = types.ModuleType("core.api_client")
 
         class Client:
-            async def _request_json(self, path, _params, **_kwargs):
-                return {"direct": path}
+            def __init__(self, cookies, proxy=None, page_bridge=None):
+                self.cookies = cookies
+                self.proxy = proxy
+                self.page_bridge = page_bridge
 
         api_client.DouyinAPIClient = Client
         sys.modules["core"] = core
@@ -75,14 +77,17 @@ class PageBridgePatchTests(unittest.TestCase):
         page_bridge_patch.install()
 
         async def run():
-            client = Client()
-            profile = await client._request_json("/aweme/v1/web/user/profile/other/", {})
-            detail = await client._request_json("/aweme/v1/web/aweme/detail/", {"aweme_id": "123"})
-            return profile, detail
+            client = Client({"ttwid": "test"})
+            detail = await client.page_bridge.fetch(
+                "/aweme/v1/web/aweme/detail/",
+                {"aweme_id": "123"},
+            )
+            return client, detail
 
-        profile, detail = asyncio.run(run())
-        self.assertEqual(profile["direct"], "/aweme/v1/web/user/profile/other/")
-        self.assertEqual(detail["aweme_detail"]["aweme_id"], "123")
+        client, detail = asyncio.run(run())
+        self.assertEqual(client.proxy, None)
+        self.assertIsInstance(client.page_bridge, page_bridge_patch.LocalPageBridge)
+        self.assertEqual(detail.body["aweme_detail"]["aweme_id"], "123")
         self.assertEqual(self.server.requests[0]["path"], "/aweme/v1/web/aweme/detail/")
 
 

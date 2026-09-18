@@ -3,8 +3,6 @@ import asyncio
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -20,115 +18,7 @@ def emit(event, **payload):
     print(json.dumps({"event": event, **payload}, ensure_ascii=False), flush=True)
 
 
-class PageBridgeError(RuntimeError):
-    def __init__(self, code, message):
-        self.page_bridge_code = code
-        super().__init__(message)
-
-
-class PageBridgeResult:
-    def __init__(self, status, text):
-        self.http_status = int(status or 0)
-        self.text = str(text or "")
-        try:
-            self.body = json.loads(self.text) if self.text else None
-        except json.JSONDecodeError:
-            self.body = None
-
-
-class LocalPageBridge:
-    """Use the desktop app's logged-in hidden Douyin page for gated API calls."""
-
-    def __init__(self):
-        self.url = os.environ.get("DOUYIN_PAGE_BRIDGE_URL", "").strip()
-        self.token = os.environ.get("DOUYIN_PAGE_BRIDGE_TOKEN", "").strip()
-
-    @property
-    def available(self):
-        return bool(self.url and self.token)
-
-    async def fetch(self, path, params, *, method="GET", data=None):
-        if not self.available:
-            raise PageBridgeError("UNAVAILABLE", "应用内抖音请求通道不可用")
-        payload = json.dumps(
-            {"path": path, "query": params or {}, "method": method, "form": data},
-            ensure_ascii=False,
-        ).encode("utf-8")
-
-        def request_bridge():
-            request = urllib.request.Request(
-                self.url,
-                data=payload,
-                headers={
-                    "Content-Type": "application/json; charset=utf-8",
-                    "X-Douyin-Bridge-Token": self.token,
-                },
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=45) as response:
-                    return response.status, response.read().decode("utf-8", "replace")
-            except urllib.error.HTTPError as exc:
-                return exc.code, exc.read().decode("utf-8", "replace")
-
-        status, text = await asyncio.to_thread(request_bridge)
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise PageBridgeError("INVALID_RESPONSE", "应用内抖音请求返回了无效数据") from exc
-        if status != 200:
-            raise PageBridgeError(data.get("code", "PAGE_BRIDGE_ERROR"), data.get("message", "应用内请求失败"))
-        return PageBridgeResult(data.get("status"), data.get("text"))
-
-
-PAGE_BRIDGE_PATHS = {
-    "/aweme/v1/web/aweme/post/",
-    "/aweme/v1/web/aweme/detail/",
-}
-
-
-def use_page_bridge(client, bridge):
-    """Route only gated Douyin API calls through the signed browser page."""
-
-    direct_request_json = client._request_json
-
-    async def request_json(path, params, *, suppress_error=False, max_retries=3):
-        if path not in PAGE_BRIDGE_PATHS:
-            return await direct_request_json(
-                path,
-                params,
-                suppress_error=suppress_error,
-                max_retries=max_retries,
-            )
-        last_error = None
-        for attempt in range(max_retries):
-            try:
-                result = await bridge.fetch(path, params)
-                if result.http_status == 200 and isinstance(result.body, dict):
-                    return result.body
-                if result.http_status == 200:
-                    last_error = PageBridgeError(
-                        "INVALID_RESPONSE",
-                        "抖音页面返回了无效数据，请重新登录后重试。",
-                    )
-                else:
-                    last_error = PageBridgeError(
-                        "HTTP_ERROR",
-                        f"抖音页面请求失败（HTTP {result.http_status}）。",
-                    )
-            except PageBridgeError as exc:
-                last_error = exc
-                if exc.page_bridge_code in {"NOT_LOGGED_IN", "PAGE_LOAD_FAILED"}:
-                    raise
-
-            if attempt < max_retries - 1:
-                await asyncio.sleep(attempt + 1)
-
-        if last_error:
-            raise last_error
-        return {}
-
-    client._request_json = request_json
+from page_bridge_patch import LocalPageBridge
 
 
 def media_type(item):
@@ -200,10 +90,13 @@ async def scan(config_path, raw_url, args):
     # keeps an authorised archive job stable after the in-page request is signed.
     pacer = CooperativePacer(min_interval=0.65, max_interval=2.0)
     bridge = LocalPageBridge()
-    client = DouyinAPIClient(cookies, config.get("proxy"))
+    client = DouyinAPIClient(
+        cookies,
+        config.get("proxy"),
+        page_bridge=bridge if bridge.available else None,
+    )
     if bridge.available:
-        use_page_bridge(client, bridge)
-        emit("progress", progress=2, message="已启用应用内登录通道...")
+        emit("progress", progress=2, message="已启用新版应用内抖音通道...")
 
     async with client:
         url = raw_url

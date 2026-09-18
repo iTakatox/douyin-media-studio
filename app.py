@@ -171,6 +171,13 @@ def build_config_text(links, raw_dir, options):
             "mode": ["post"],
             "media_types": ["video", "gallery"],
             "comments": {"enabled": False},
+            "browser_fallback": {
+                "enabled": True,
+                "headless": True,
+                "max_scrolls": 240,
+                "idle_rounds": 8,
+                "wait_timeout_seconds": 600,
+            },
         }
     )
     return yaml.safe_dump(source, allow_unicode=True, sort_keys=False)

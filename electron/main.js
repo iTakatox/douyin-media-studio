@@ -31,7 +31,7 @@ function runtimeDir() {
 }
 
 function downloaderDir() {
-  return process.env.DOUYIN_DOWNLOADER_DIR || path.join(app.getPath("userData"), "douyin-downloader");
+  return process.env.DOUYIN_DOWNLOADER_DIR || path.join(app.getPath("userData"), "douyin-downloader-v4");
 }
 
 function backendCommand() {

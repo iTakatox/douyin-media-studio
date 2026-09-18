@@ -8,6 +8,7 @@ $DownloaderDir = if ($env:DOUYIN_DOWNLOADER_DIR) {
 else {
     Join-Path $WorkspaceRoot "douyin-downloader"
 }
+$LegacyConfig = Join-Path (Split-Path -Parent $DownloaderDir) "douyin-downloader\config.yml"
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
     throw "Python was not found. Install Python 3.11 or newer and enable Add Python to PATH."
@@ -77,7 +78,13 @@ try {
     }
 
     if (-not (Test-Path -LiteralPath ".\config.yml")) {
-        Copy-Item -LiteralPath ".\config.example.yml" -Destination ".\config.yml"
+        if (Test-Path -LiteralPath $LegacyConfig) {
+            Write-Output "Migrating saved login configuration..."
+            Copy-Item -LiteralPath $LegacyConfig -Destination ".\config.yml"
+        }
+        else {
+            Copy-Item -LiteralPath ".\config.example.yml" -Destination ".\config.yml"
+        }
     }
 }
 finally {
