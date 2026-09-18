@@ -438,10 +438,10 @@ ipcMain.handle("open-login", async () => {
     autoHideMenuBar: true,
     webPreferences: { partition },
   });
-  const isWebUrl = url => /^https?:\/\//i.test(url);
-  const isAllowedResource = url => /^(https?|data|blob):/i.test(url);
-  const blockExternalProtocol = (event, url) => {
-    if (!isWebUrl(url)) {
+  const isWebUrl = target => /^https?:\/\//i.test(target);
+  const isAllowedResource = target => /^(https?|data|blob):/i.test(target);
+  const blockExternalProtocol = (event, target) => {
+    if (!isWebUrl(target)) {
       event.preventDefault();
       return true;
     }
@@ -453,14 +453,18 @@ ipcMain.handle("open-login", async () => {
   loginWindow.webContents.on("will-redirect", (event, url) => {
     blockExternalProtocol(event, url);
   });
-  loginWindow.webContents.on("will-frame-navigate", event => {
-    blockExternalProtocol(event, event.url);
+  loginWindow.webContents.on("will-frame-navigate", (event, target) => {
+    blockExternalProtocol(event, target);
   });
   loginWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isWebUrl(url) && /(^|\.)douyin\.com$/i.test(new URL(url).hostname)) {
       loginWindow.loadURL(url).catch(() => {});
     }
     return { action: "deny" };
+  });
+  loginWindow.webContents.on("will-attach-webview", event => event.preventDefault());
+  loginWindow.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
   });
   session.fromPartition(partition).webRequest.onBeforeRequest((details, callback) => {
     callback({ cancel: !isAllowedResource(details.url) });
